@@ -49,7 +49,7 @@ const reminderMorningHour = getPositiveInteger(REMINDER_MORNING_HOUR, 8);
 const reminderCheckIntervalMs = getPositiveInteger(REMINDER_CHECK_INTERVAL_SECONDS, 60) * 1000;
 
 app.get("/", (_req, res) => {
-  res.json({ ok: true, service: "pnp-line-drive-bot" });
+  res.json({ ok: true, service: "PNP BOT" });
 });
 
 app.post("/webhook", express.raw({ type: "*/*" }), (req, res) => {
@@ -1046,7 +1046,7 @@ async function start() {
   }
 
   app.listen(PORT, () => {
-    console.log(`LINE Drive bot listening on port ${PORT}`);
+    console.log(`PNP BOT listening on port ${PORT}`);
   });
 }
 

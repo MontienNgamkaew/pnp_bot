@@ -1,4 +1,4 @@
-# PNP LINE Drive Bot
+# PNP BOT
 
 LINE bot สำหรับเก็บไฟล์ที่สมาชิกส่งในกลุ่ม LINE ลง Google Drive อัตโนมัติ โดยแยกเป็นโฟลเดอร์ `Images`, `Videos`, และ `Documents`
 

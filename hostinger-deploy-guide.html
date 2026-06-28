@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>คู่มือติดตั้ง LINE Drive Bot บน Hostinger</title>
+  <title>คู่มือติดตั้ง PNP BOT บน Hostinger</title>
   <style>
     body {
       margin: 0;
@@ -106,7 +106,7 @@
 </head>
 <body>
   <main>
-    <h1>คู่มือติดตั้ง LINE Drive Bot บน Hostinger</h1>
+    <h1>คู่มือติดตั้ง PNP BOT บน Hostinger</h1>
 
     <p>
       คู่มือนี้อธิบายตั้งแต่การเตรียม Google Drive, การตั้งค่า LINE Messaging API,
@@ -290,7 +290,7 @@ GOOGLE_SERVICE_ACCOUNT_BASE64=ใส่_base64_จาก_json_key</code></pre>
     <ol>
       <li>เข้า GitHub</li>
       <li>กด <strong>New repository</strong></li>
-      <li>ตั้งชื่อ เช่น <code>pnp-line-drive-bot</code></li>
+      <li>ตั้งชื่อ เช่น <code>pnp_bot</code></li>
       <li>เลือก Private ถ้าต้องการเก็บโค้ดส่วนตัว</li>
       <li>กด <strong>Create repository</strong></li>
     </ol>
@@ -298,9 +298,9 @@ GOOGLE_SERVICE_ACCOUNT_BASE64=ใส่_base64_จาก_json_key</code></pre>
     <h3>4.2 commit และ push</h3>
     <pre><code>git init
 git add .
-git commit -m "Initial LINE Drive bot"
+git commit -m "Initial PNP BOT"
 git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/pnp-line-drive-bot.git
+git remote add origin https://github.com/YOUR_USERNAME/pnp_bot.git
 git push -u origin main</code></pre>
 
     <h2>5. Deploy บน Hostinger ผ่าน GitHub</h2>
@@ -459,7 +459,7 @@ REMINDER_CHECK_INTERVAL_SECONDS=60</code></pre>
     <p>ถ้าระบบทำงาน ควรเห็น JSON ประมาณนี้:</p>
     <pre><code>{
   "ok": true,
-  "service": "pnp-line-drive-bot"
+  "service": "PNP BOT"
 }</code></pre>
 
     <h2>6. ตั้ง Webhook URL ใน LINE</h2>
