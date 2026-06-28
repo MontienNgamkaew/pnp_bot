@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>คู่มือติดตั้ง LINE Drive Bot บน Hostinger</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      line-height: 1.7;
+      color: #1f2937;
+      background: #f3f4f6;
+    }
+
+    main {
+      max-width: 960px;
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 32px 22px 64px;
+      background: #ffffff;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.25;
+      color: #111827;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 32px;
+    }
+
+    h2 {
+      margin-top: 38px;
+      padding-top: 26px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 24px;
+    }
+
+    h3 {
+      margin-top: 24px;
+      font-size: 18px;
+    }
+
+    code, pre {
+      font-family: Consolas, Monaco, monospace;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: #eef2f7;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 14px;
+      border-radius: 6px;
+      background: #111827;
+      color: #f9fafb;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+
+    th, td {
+      vertical-align: top;
+      text-align: left;
+      padding: 10px;
+      border: 1px solid #d1d5db;
+    }
+
+    th {
+      background: #f9fafb;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    .note {
+      margin: 16px 0;
+      padding: 12px 14px;
+      border-left: 4px solid #2563eb;
+      border-radius: 4px;
+      background: #eff6ff;
+    }
+
+    .warn {
+      margin: 16px 0;
+      padding: 12px 14px;
+      border-left: 4px solid #d97706;
+      border-radius: 4px;
+      background: #fffbeb;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>คู่มือติดตั้ง LINE Drive Bot บน Hostinger</h1>
+
+    <p>
+      คู่มือนี้อธิบายตั้งแต่การเตรียม Google Drive, การตั้งค่า LINE Messaging API,
+      การนำโค้ดขึ้น GitHub, การ deploy บน Hostinger และการทดสอบใช้งานจริง
+    </p>
+
+    <div class="note">
+      คู่มือนี้อ้างอิงโค้ดในโปรเจกต์นี้ ซึ่งรันด้วย Node.js และมี endpoint หลักคือ
+      <code>/webhook</code>
+    </div>
+
+    <h2>ภาพรวมระบบ</h2>
+    <pre><code>สมาชิกส่งไฟล์ในกลุ่ม LINE
+        ↓
+LINE ส่ง webhook มาที่ Hostinger
+        ↓
+Node.js bot ตรวจลายเซ็นและดาวน์โหลดไฟล์จาก LINE
+        ↓
+bot อัปโหลดไฟล์เข้า Google Drive
+        ↓
+Drive แยกโฟลเดอร์ Images, Videos, Documents</code></pre>
+
+    <h2>สิ่งที่ต้องมี</h2>
+    <ul>
+      <li>บัญชี Hostinger ที่รองรับ Node.js app และเชื่อม GitHub ได้</li>
+      <li>โดเมนหรือซับโดเมน เช่น <code>bot.example.com</code></li>
+      <li>บัญชี GitHub</li>
+      <li>บัญชี LINE Developers</li>
+      <li>บัญชี Google Cloud และ Google Drive</li>
+      <li>Node.js 20 ขึ้นไปสำหรับทดสอบบนเครื่องตัวเอง</li>
+    </ul>
+
+    <h2>1. เตรียม Google Drive และ Service Account</h2>
+
+    <h3>1.1 สร้าง Google Cloud Project</h3>
+    <ol>
+      <li>เข้า <code>https://console.cloud.google.com/</code></li>
+      <li>กดเลือก project ด้านบน</li>
+      <li>กด <strong>New Project</strong></li>
+      <li>ตั้งชื่อ เช่น <code>line-drive-bot</code></li>
+      <li>กด <strong>Create</strong></li>
+    </ol>
+
+    <h3>1.2 เปิด Google Drive API</h3>
+    <ol>
+      <li>เข้าเมนู <strong>APIs &amp; Services</strong></li>
+      <li>กด <strong>Library</strong></li>
+      <li>ค้นหา <code>Google Drive API</code></li>
+      <li>กด <strong>Enable</strong></li>
+    </ol>
+
+    <h3>1.3 สร้าง Service Account</h3>
+    <ol>
+      <li>เข้าเมนู <strong>IAM &amp; Admin</strong></li>
+      <li>เลือก <strong>Service Accounts</strong></li>
+      <li>กด <strong>Create service account</strong></li>
+      <li>ตั้งชื่อ เช่น <code>line-drive-uploader</code></li>
+      <li>กด <strong>Create and continue</strong></li>
+      <li>ข้ามการให้ role ระดับ project ได้ เพราะเราจะให้สิทธิ์เฉพาะโฟลเดอร์ใน Drive</li>
+      <li>กด <strong>Done</strong></li>
+    </ol>
+
+    <h3>1.4 สร้าง JSON Key</h3>
+    <ol>
+      <li>คลิก service account ที่สร้างไว้</li>
+      <li>เข้าแท็บ <strong>Keys</strong></li>
+      <li>กด <strong>Add key</strong></li>
+      <li>เลือก <strong>Create new key</strong></li>
+      <li>เลือกชนิด <strong>JSON</strong></li>
+      <li>ดาวน์โหลดไฟล์ JSON เก็บไว้ในเครื่อง</li>
+    </ol>
+
+    <div class="warn">
+      ไฟล์ JSON key เป็นความลับ ห้าม commit เข้า GitHub และห้ามส่งให้คนอื่น
+    </div>
+
+    <h3>1.5 สร้างโฟลเดอร์หลักใน Google Drive</h3>
+    <ol>
+      <li>เข้า Google Drive</li>
+      <li>สร้างโฟลเดอร์ เช่น <code>LINE Group Files</code></li>
+      <li>เปิดโฟลเดอร์นั้น</li>
+      <li>คัดลอก Folder ID จาก URL</li>
+    </ol>
+
+    <p>ตัวอย่าง URL:</p>
+    <pre><code>https://drive.google.com/drive/folders/1AbCdEfGh12345</code></pre>
+
+    <p>ค่า Folder ID คือ:</p>
+    <pre><code>1AbCdEfGh12345</code></pre>
+
+    <h3>1.6 แชร์โฟลเดอร์ให้ Service Account</h3>
+    <ol>
+      <li>กลับไปดู email ของ service account ใน Google Cloud</li>
+      <li>email จะหน้าตาประมาณ <code>line-drive-uploader@project-id.iam.gserviceaccount.com</code></li>
+      <li>กลับไปที่โฟลเดอร์ <code>LINE Group Files</code> ใน Google Drive</li>
+      <li>กด <strong>Share</strong></li>
+      <li>ใส่ email ของ service account</li>
+      <li>ตั้งสิทธิ์เป็น <strong>Editor</strong></li>
+      <li>กด <strong>Send</strong></li>
+    </ol>
+
+    <h3>1.7 แปลง JSON Key เป็น Base64</h3>
+    <p>บน macOS หรือ Linux:</p>
+    <pre><code>base64 -w 0 service-account.json</code></pre>
+
+    <p>ถ้าคำสั่งด้านบนใช้ไม่ได้บน macOS ให้ใช้:</p>
+    <pre><code>base64 service-account.json</code></pre>
+
+    <p>คัดลอกผลลัพธ์ที่ได้ไว้ ใช้เป็นค่า <code>GOOGLE_SERVICE_ACCOUNT_BASE64</code></p>
+
+    <h2>2. ตั้งค่า LINE Messaging API</h2>
+
+    <h3>2.1 สร้าง Provider และ Channel</h3>
+    <ol>
+      <li>เข้า <code>https://developers.line.biz/console/</code></li>
+      <li>สร้าง Provider ใหม่ หรือใช้ Provider เดิม</li>
+      <li>กด <strong>Create a Messaging API channel</strong></li>
+      <li>กรอกชื่อบอต รายละเอียด และข้อมูลที่ LINE ต้องการ</li>
+      <li>สร้าง channel ให้เรียบร้อย</li>
+    </ol>
+
+    <h3>2.2 คัดลอก Channel Secret</h3>
+    <ol>
+      <li>เข้า channel ที่สร้างไว้</li>
+      <li>ไปที่แท็บ <strong>Basic settings</strong></li>
+      <li>คัดลอกค่า <code>Channel secret</code></li>
+      <li>ค่านี้ใช้เป็น <code>LINE_CHANNEL_SECRET</code></li>
+    </ol>
+
+    <h3>2.3 สร้าง Channel Access Token</h3>
+    <ol>
+      <li>เข้าแท็บ <strong>Messaging API</strong></li>
+      <li>หา section <strong>Channel access token</strong></li>
+      <li>กด <strong>Issue</strong> หรือ <strong>Reissue</strong></li>
+      <li>คัดลอก token ที่ได้</li>
+      <li>ค่านี้ใช้เป็น <code>LINE_CHANNEL_ACCESS_TOKEN</code></li>
+    </ol>
+
+    <h3>2.4 เปิด Webhook</h3>
+    <ol>
+      <li>ในแท็บ <strong>Messaging API</strong></li>
+      <li>ตั้ง <strong>Use webhook</strong> เป็น Enabled</li>
+      <li>ปิด <strong>Auto-reply messages</strong> ถ้าไม่ต้องการให้บอตตอบข้อความเอง</li>
+      <li>ปิด <strong>Greeting messages</strong> ถ้าไม่ต้องการข้อความทักทายอัตโนมัติ</li>
+    </ol>
+
+    <h3>2.5 เพิ่มบอตเข้ากลุ่ม LINE</h3>
+    <ol>
+      <li>ในแท็บ <strong>Messaging API</strong> หา QR code ของบอต</li>
+      <li>เพิ่มบอตเป็นเพื่อน</li>
+      <li>เชิญบอตเข้ากลุ่มที่ต้องการเก็บไฟล์</li>
+    </ol>
+
+    <h2>3. เตรียมโค้ดบนเครื่องก่อนขึ้น GitHub</h2>
+
+    <h3>3.1 ติดตั้ง dependencies</h3>
+    <pre><code>npm install</code></pre>
+
+    <h3>3.2 ตรวจ syntax</h3>
+    <pre><code>node --check src/server.js</code></pre>
+
+    <h3>3.3 สร้างไฟล์ .env สำหรับทดสอบ local</h3>
+    <pre><code>cp .env.example .env</code></pre>
+
+    <p>ตัวอย่างค่าใน <code>.env</code>:</p>
+    <pre><code>PORT=3000
+
+LINE_CHANNEL_SECRET=ใส่_channel_secret
+LINE_CHANNEL_ACCESS_TOKEN=ใส่_channel_access_token
+
+GOOGLE_DRIVE_ROOT_FOLDER_ID=ใส่_google_drive_folder_id
+GOOGLE_SERVICE_ACCOUNT_BASE64=ใส่_base64_จาก_json_key</code></pre>
+
+    <div class="warn">
+      ห้าม commit ไฟล์ <code>.env</code> เข้า GitHub ไฟล์นี้ถูกใส่ไว้ใน <code>.gitignore</code> แล้ว
+    </div>
+
+    <h2>4. นำโค้ดขึ้น GitHub</h2>
+
+    <h3>4.1 สร้าง repository</h3>
+    <ol>
+      <li>เข้า GitHub</li>
+      <li>กด <strong>New repository</strong></li>
+      <li>ตั้งชื่อ เช่น <code>pnp-line-drive-bot</code></li>
+      <li>เลือก Private ถ้าต้องการเก็บโค้ดส่วนตัว</li>
+      <li>กด <strong>Create repository</strong></li>
+    </ol>
+
+    <h3>4.2 commit และ push</h3>
+    <pre><code>git init
+git add .
+git commit -m "Initial LINE Drive bot"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/pnp-line-drive-bot.git
+git push -u origin main</code></pre>
+
+    <h2>5. Deploy บน Hostinger ผ่าน GitHub</h2>
+
+    <div class="note">
+      ชื่อเมนูใน hPanel อาจต่างกันเล็กน้อยตามแพ็กเกจ Hostinger แต่ค่าที่ต้องตั้งจะเหมือนกัน:
+      repository, branch, install command, start command, environment variables และ domain
+    </div>
+
+    <h3>5.0 สร้าง MySQL Database สำหรับระบบนัดหมาย</h3>
+    <ol>
+      <li>เข้า Hostinger hPanel</li>
+      <li>ไปที่เมนู <strong>Databases</strong> หรือ <strong>MySQL Databases</strong></li>
+      <li>สร้าง database ใหม่ เช่น <code>line_bot</code></li>
+      <li>สร้าง user และ password สำหรับ database นี้</li>
+      <li>จดค่า host, port, database name, username และ password</li>
+      <li>นำค่าเหล่านี้ไปใส่ใน Environment Variables ของ Node.js app</li>
+    </ol>
+
+    <p>บอตจะสร้างตาราง <code>appointments</code> ให้อัตโนมัติเมื่อ app start ครั้งแรก</p>
+
+    <div class="note">
+      ถ้ายังไม่ต้องการใช้ระบบนัดหมาย สามารถเว้นค่า MySQL ไว้ก่อนได้ บอตจะยังเก็บไฟล์เข้า Google Drive ได้ตามปกติ
+      แต่คำสั่ง <code>/นัด</code>, <code>/นัดหมาย</code> และ <code>/ยกเลิกนัด</code> จะยังไม่ทำงานจนกว่าจะตั้งค่า DB ครบ
+    </div>
+
+    <h3>5.1 สร้าง Node.js App</h3>
+    <ol>
+      <li>เข้า Hostinger hPanel</li>
+      <li>เลือกเว็บไซต์หรือ hosting plan ที่ต้องการใช้</li>
+      <li>ไปที่เมนูสำหรับ <strong>Node.js</strong>, <strong>Web App</strong>, <strong>App Deployment</strong> หรือ <strong>GitHub Deployment</strong></li>
+      <li>เลือกสร้าง app ใหม่</li>
+      <li>เลือก runtime เป็น Node.js 20 หรือสูงกว่า ถ้ามีให้เลือก</li>
+      <li>เลือก deploy จาก GitHub</li>
+      <li>เชื่อมต่อบัญชี GitHub และอนุญาตให้ Hostinger อ่าน repository</li>
+      <li>เลือก repository ของบอต</li>
+      <li>เลือก branch เป็น <code>main</code></li>
+    </ol>
+
+    <h3>5.2 ตั้งค่า build และ start command</h3>
+    <table>
+      <tr>
+        <th>รายการ</th>
+        <th>ค่า</th>
+      </tr>
+      <tr>
+        <td>Install command</td>
+        <td><code>npm install</code></td>
+      </tr>
+      <tr>
+        <td>Build command</td>
+        <td>เว้นว่าง หรือใส่ <code>npm install</code> ถ้า Hostinger บังคับให้กรอก</td>
+      </tr>
+      <tr>
+        <td>Start command</td>
+        <td><code>npm start</code></td>
+      </tr>
+      <tr>
+        <td>Entry point</td>
+        <td><code>src/server.js</code></td>
+      </tr>
+      <tr>
+        <td>Port</td>
+        <td>ถ้า Hostinger กำหนด port ให้ ใช้ตัวแปร <code>PORT</code> ตามระบบได้เลย</td>
+      </tr>
+    </table>
+
+    <h3>5.3 ตั้ง Environment Variables บน Hostinger</h3>
+    <p>เพิ่มค่าต่อไปนี้ในหน้า Environment Variables ของ app:</p>
+    <table>
+      <tr>
+        <th>Variable</th>
+        <th>คำอธิบาย</th>
+      </tr>
+      <tr>
+        <td><code>LINE_CHANNEL_SECRET</code></td>
+        <td>Channel secret จาก LINE Developers</td>
+      </tr>
+      <tr>
+        <td><code>LINE_CHANNEL_ACCESS_TOKEN</code></td>
+        <td>Channel access token จาก LINE Developers</td>
+      </tr>
+      <tr>
+        <td><code>GOOGLE_DRIVE_ROOT_FOLDER_ID</code></td>
+        <td>Folder ID ของโฟลเดอร์หลักใน Google Drive</td>
+      </tr>
+      <tr>
+        <td><code>GOOGLE_SERVICE_ACCOUNT_BASE64</code></td>
+        <td>JSON key ของ service account ที่แปลงเป็น base64</td>
+      </tr>
+      <tr>
+        <td><code>DB_HOST</code></td>
+        <td>MySQL host จาก Hostinger สำหรับระบบนัดหมาย</td>
+      </tr>
+      <tr>
+        <td><code>DB_PORT</code></td>
+        <td>ปกติใช้ <code>3306</code></td>
+      </tr>
+      <tr>
+        <td><code>DB_USER</code></td>
+        <td>MySQL username</td>
+      </tr>
+      <tr>
+        <td><code>DB_PASSWORD</code></td>
+        <td>MySQL password</td>
+      </tr>
+      <tr>
+        <td><code>DB_NAME</code></td>
+        <td>ชื่อ MySQL database</td>
+      </tr>
+      <tr>
+        <td><code>REMINDER_MORNING_HOUR</code></td>
+        <td>ชั่วโมงแจ้งเตือนเช้าวันนัดหมาย เช่น <code>8</code></td>
+      </tr>
+      <tr>
+        <td><code>REMINDER_CHECK_INTERVAL_SECONDS</code></td>
+        <td>ความถี่ที่ server ตรวจนัดหมาย เช่น <code>60</code></td>
+      </tr>
+    </table>
+
+    <p>ถ้า Hostinger ให้ตั้ง <code>PORT</code> เอง ให้ใส่:</p>
+    <pre><code>PORT=3000</code></pre>
+
+    <p>ถ้า Hostinger จัดการ port เอง ไม่ต้องใส่ <code>PORT</code></p>
+
+    <p>ตัวอย่าง environment variables สำหรับระบบนัดหมาย:</p>
+    <pre><code>DB_HOST=your_hostinger_mysql_host
+DB_PORT=3306
+DB_USER=your_mysql_user
+DB_PASSWORD=your_mysql_password
+DB_NAME=your_mysql_database
+
+REMINDER_MORNING_HOUR=8
+REMINDER_CHECK_INTERVAL_SECONDS=60</code></pre>
+
+    <div class="warn">
+      หลังแก้ Environment Variables บน Hostinger ให้ redeploy หรือ restart app ทุกครั้ง
+      ถ้า DB ตั้งค่าถูกต้อง log ตอนเริ่มระบบควรมีข้อความ <code>Appointment database is ready</code>
+    </div>
+
+    <h3>5.4 ตั้ง Domain หรือ Subdomain</h3>
+    <ol>
+      <li>สร้าง subdomain เช่น <code>bot.yourdomain.com</code></li>
+      <li>ผูก subdomain นั้นกับ Node.js app</li>
+      <li>เปิด SSL/HTTPS ใน Hostinger</li>
+      <li>รอ DNS และ SSL ทำงานสมบูรณ์</li>
+    </ol>
+
+    <h3>5.5 Deploy</h3>
+    <ol>
+      <li>กด Deploy หรือ Save แล้วให้ Hostinger เริ่ม deploy</li>
+      <li>รอจนสถานะเป็น Running หรือ Active</li>
+      <li>เปิด URL หลักของ app ใน browser</li>
+    </ol>
+
+    <p>ถ้าระบบทำงาน ควรเห็น JSON ประมาณนี้:</p>
+    <pre><code>{
+  "ok": true,
+  "service": "pnp-line-drive-bot"
+}</code></pre>
+
+    <h2>6. ตั้ง Webhook URL ใน LINE</h2>
+
+    <ol>
+      <li>กลับไปที่ LINE Developers Console</li>
+      <li>เข้า channel ของบอต</li>
+      <li>ไปที่แท็บ <strong>Messaging API</strong></li>
+      <li>ใส่ Webhook URL เป็น URL ของ Hostinger ตามด้วย <code>/webhook</code></li>
+    </ol>
+
+    <p>ตัวอย่าง:</p>
+    <pre><code>https://bot.yourdomain.com/webhook</code></pre>
+
+    <ol start="5">
+      <li>กด <strong>Update</strong></li>
+      <li>กด <strong>Verify</strong></li>
+      <li>ตรวจว่า <strong>Use webhook</strong> เปิดอยู่</li>
+    </ol>
+
+    <h2>7. ทดสอบใช้งานจริง</h2>
+
+    <ol>
+      <li>เพิ่มบอตเข้ากลุ่ม LINE</li>
+      <li>ส่งรูปภาพ 1 ไฟล์</li>
+      <li>ตรวจ Google Drive ว่ามีโฟลเดอร์ <code>Images</code> และมีไฟล์รูปเข้าไป</li>
+      <li>ส่งวิดีโอ 1 ไฟล์</li>
+      <li>ตรวจโฟลเดอร์ <code>Videos</code></li>
+      <li>ส่ง PDF หรือเอกสาร 1 ไฟล์</li>
+      <li>ตรวจโฟลเดอร์ <code>Documents</code></li>
+    </ol>
+
+    <p>โครงสร้างบน Google Drive จะเป็น:</p>
+    <pre><code>LINE Group Files/
+  Images/
+  Videos/
+  Documents/</code></pre>
+
+    <h2>8. คำสั่งจัดระเบียบไฟล์ในกลุ่ม LINE</h2>
+
+    <p>
+      ถ้าต้องการแยกไฟล์ตามงานหรือหัวข้อ ให้พิมพ์คำสั่งในกลุ่มก่อนส่งไฟล์:
+    </p>
+
+    <pre><code>/folder งานประชุม</code></pre>
+
+    <p>จากนั้นไฟล์ที่ส่งถัดไปจะถูกเก็บเป็นโฟลเดอร์ย่อย:</p>
+
+    <pre><code>LINE Group Files/
+  Images/
+    งานประชุม/
+  Videos/
+    งานประชุม/
+  Documents/
+    งานประชุม/</code></pre>
+
+    <p>คำสั่งที่ใช้ได้:</p>
+    <pre><code>/folder       ดูหมวดปัจจุบัน
+/folder off   ปิดหมวดปัจจุบัน
+/help         ดูคำสั่งทั้งหมด</code></pre>
+
+    <p>
+      หมวดมีผลแยกตามห้องแชตหรือกลุ่ม LINE ถ้าไม่ใช้คำสั่ง <code>/folder</code>
+      ไฟล์จะถูกเก็บในโฟลเดอร์ปกติตามประเภทไฟล์ ถ้าตั้งหมวดที่ยังไม่มีโฟลเดอร์อยู่
+      ระบบจะสร้างโฟลเดอร์ให้อัตโนมัติ เมื่อใช้งานหมวดเสร็จ ให้พิมพ์ <code>/folder off</code>
+    </p>
+
+    <div class="warn">
+      สถานะหมวดถูกเก็บใน memory ของ app ถ้า Hostinger redeploy หรือ restart app
+      หมวดปัจจุบันจะถูกล้าง ให้พิมพ์ <code>/folder ชื่อหมวด</code> ใหม่อีกครั้ง
+    </div>
+
+    <h3>ข้อความตอบกลับหลังบันทึกสำเร็จ</h3>
+    <p>เมื่ออัปโหลดไฟล์เข้า Google Drive สำเร็จ บอตจะรอช่วงสั้น ๆ แล้วสรุปผลเป็นข้อความเดียว:</p>
+    <pre><code>ทำการบันทึกไฟล์เรียบร้อย 10 ไฟล์
+
+สรุป:
+Images/งานประชุม: 6 ไฟล์
+Videos/งานประชุม: 2 ไฟล์
+Documents/งานประชุม: 2 ไฟล์
+
+โฟลเดอร์:
+Images/งานประชุม: https://drive.google.com/drive/folders/...
+Videos/งานประชุม: https://drive.google.com/drive/folders/...
+Documents/งานประชุม: https://drive.google.com/drive/folders/...</code></pre>
+
+    <p>
+      ค่าเริ่มต้นจะรอ 45 วินาทีก่อนส่งสรุป ปรับได้ด้วย environment variable
+      <code>SUMMARY_DELAY_SECONDS</code> ถ้าบันทึกไฟล์ไม่สำเร็จ บอตจะแจ้ง error ในกลุ่ม
+    </p>
+
+    <p>
+      ถ้าต้องการให้สมาชิกในกลุ่มเปิดลิงก์ได้ ต้องแชร์โฟลเดอร์ Google Drive ให้สมาชิกเหล่านั้น
+      หรือปรับสิทธิ์เป็น anyone with the link ตามนโยบายความปลอดภัยของคุณ
+    </p>
+
+    <h2>9. คำสั่งนัดหมายในกลุ่ม LINE</h2>
+
+    <p>สร้างนัดหมาย:</p>
+    <pre><code>/นัด ประชุมโครงการ | 2026-07-05 14:00 | ห้องประชุม A</code></pre>
+
+    <p>เมื่อบันทึกสำเร็จ บอตจะตอบกลับพร้อมรหัสนัดหมาย:</p>
+    <pre><code>บันทึกนัดหมายแล้ว
+
+รหัส: A-1234
+หัวข้อ: ประชุมโครงการ
+เวลา: 5 ก.ค. 2026 14:00
+รายละเอียด: ห้องประชุม A
+
+จะแจ้งเตือนเช้าวันนัดหมาย 08:00 และก่อนเวลานัด 10 นาที</code></pre>
+
+    <p>ดูนัดหมายที่กำลังจะมาถึง:</p>
+    <pre><code>/นัดหมาย</code></pre>
+
+    <p>ยกเลิกนัดหมาย:</p>
+    <pre><code>/ยกเลิกนัด A-1234</code></pre>
+
+    <p>ดูตัวอย่างคำสั่ง:</p>
+    <pre><code>/นัด help</code></pre>
+
+    <p>ระบบจะตรวจนัดหมายทุก 60 วินาที และส่งแจ้งเตือนเข้า LINE กลุ่มตามเวลาที่ตั้งไว้</p>
+
+    <h3>ทดสอบระบบนัดหมายหลัง deploy</h3>
+    <ol>
+      <li>พิมพ์ <code>/นัด help</code> ในกลุ่ม LINE เพื่อดูตัวอย่างคำสั่ง</li>
+      <li>สร้างนัดหมายทดสอบที่อยู่ในอนาคต เช่น อีก 15 นาที</li>
+      <li>พิมพ์ <code>/นัดหมาย</code> เพื่อตรวจว่านัดหมายถูกบันทึกใน MySQL แล้ว</li>
+      <li>รอให้บอตแจ้งเตือนก่อนเวลานัดหมาย 10 นาที</li>
+      <li>สร้างนัดหมายอีกอัน แล้วทดสอบยกเลิกด้วย <code>/ยกเลิกนัด รหัส</code></li>
+    </ol>
+
+    <div class="note">
+      เวลาที่พิมพ์ในคำสั่งใช้รูปแบบ <code>YYYY-MM-DD HH:mm</code> และอ้างอิงเวลาไทย
+      <code>Asia/Bangkok</code> เช่น <code>2026-07-05 14:00</code>
+    </div>
+
+    <div class="warn">
+      การแจ้งเตือนนัดหมายใช้ LINE push message จึงนับรวมกับ quota/แพ็กเกจข้อความของ LINE Official Account
+    </div>
+
+    <h2>10. วิธีอัปเดตระบบหลังแก้โค้ด</h2>
+
+    <p>เมื่อแก้โค้ดในเครื่องแล้ว ให้ push ขึ้น GitHub:</p>
+    <pre><code>git add .
+git commit -m "Update bot"
+git push</code></pre>
+
+    <p>
+      ถ้า Hostinger เปิด auto deploy จาก GitHub ไว้ ระบบจะ deploy ใหม่อัตโนมัติ
+      ถ้าไม่ได้เปิด auto deploy ให้เข้า hPanel แล้วกด Deploy ใหม่เอง
+    </p>
+
+    <h2>11. การตรวจปัญหา</h2>
+
+    <h3>เปิด URL หลักแล้วไม่ขึ้น JSON</h3>
+    <ul>
+      <li>ตรวจว่า app deploy สำเร็จ</li>
+      <li>ตรวจ start command ว่าเป็น <code>npm start</code></li>
+      <li>ตรวจ runtime ว่าเป็น Node.js 20 ขึ้นไป</li>
+      <li>ดู log ใน Hostinger</li>
+    </ul>
+
+    <h3>LINE Verify ไม่ผ่าน</h3>
+    <ul>
+      <li>ตรวจว่า URL เป็น HTTPS</li>
+      <li>ตรวจว่า URL ลงท้ายด้วย <code>/webhook</code></li>
+      <li>ตรวจว่า app กำลัง Running</li>
+      <li>ดู log ว่ามี error เรื่อง environment variables หรือไม่</li>
+    </ul>
+
+    <h3>ขึ้น Invalid LINE signature</h3>
+    <ul>
+      <li>ตรวจค่า <code>LINE_CHANNEL_SECRET</code></li>
+      <li>ต้องใช้ secret จาก channel เดียวกับ webhook ที่ตั้งไว้</li>
+      <li>หลังแก้ env แล้ว redeploy หรือ restart app</li>
+    </ul>
+
+    <h3>อัปโหลดเข้า Google Drive ไม่ได้</h3>
+    <ul>
+      <li>ตรวจว่าเปิด Google Drive API แล้ว</li>
+      <li>ตรวจว่าแชร์โฟลเดอร์หลักให้ service account เป็น Editor แล้ว</li>
+      <li>ตรวจค่า <code>GOOGLE_DRIVE_ROOT_FOLDER_ID</code></li>
+      <li>ตรวจว่า <code>GOOGLE_SERVICE_ACCOUNT_BASE64</code> คัดลอกครบ ไม่มีเว้นวรรคหรือขึ้นบรรทัดผิด</li>
+    </ul>
+
+    <h3>ส่งไฟล์แล้วไม่เห็นไฟล์ใน Drive</h3>
+    <ul>
+      <li>ตรวจ log ใน Hostinger</li>
+      <li>ตรวจว่าบอตยังอยู่ในกลุ่ม LINE</li>
+      <li>ตรวจว่าไฟล์ที่ส่งเป็น message ประเภท image, video หรือ file</li>
+      <li>ลองส่งไฟล์ขนาดเล็กก่อน เช่น รูปภาพ 1 รูป</li>
+    </ul>
+
+    <h3>คำสั่งนัดหมายบอกว่ายังไม่ได้เปิดใช้งาน</h3>
+    <ul>
+      <li>ตรวจว่าใส่ <code>DB_HOST</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code> และ <code>DB_NAME</code> ครบแล้ว</li>
+      <li>ตรวจว่า MySQL user มีสิทธิ์สร้างตารางและเขียนข้อมูลใน database</li>
+      <li>หลังแก้ Environment Variables ให้ restart หรือ redeploy app</li>
+      <li>ดู log ว่ามีข้อความ <code>Appointment database is ready</code> หรือ error จาก MySQL หรือไม่</li>
+    </ul>
+
+    <h3>บอตไม่แจ้งเตือนนัดหมาย</h3>
+    <ul>
+      <li>ตรวจว่า app ยัง Running อยู่ใน Hostinger</li>
+      <li>ตรวจค่า <code>REMINDER_MORNING_HOUR</code> และ <code>REMINDER_CHECK_INTERVAL_SECONDS</code></li>
+      <li>ตรวจว่าเวลานัดหมายยังไม่ผ่านไปแล้ว</li>
+      <li>ตรวจ LINE quota เพราะการแจ้งเตือนใช้ push message</li>
+      <li>ดู log ใน Hostinger ว่ามี error ตอนส่ง push message หรือไม่</li>
+    </ul>
+
+    <h2>12. Checklist ก่อนใช้งานจริง</h2>
+
+    <ul>
+      <li>Hostinger app เปิด URL หลักแล้วได้ <code>{"ok":true}</code></li>
+      <li>ตั้ง environment variables ครบ</li>
+      <li>เปิด HTTPS แล้ว</li>
+      <li>LINE webhook URL เป็น <code>https://โดเมนของคุณ/webhook</code></li>
+      <li>LINE Verify ผ่าน</li>
+      <li>บอตอยู่ในกลุ่ม LINE</li>
+      <li>Google Drive แชร์ให้ service account เป็น Editor</li>
+      <li>ทดสอบส่งรูป วิดีโอ และเอกสารแล้วเข้า Drive ถูกโฟลเดอร์</li>
+      <li>ถ้าใช้ระบบนัดหมาย ต้องเห็น log <code>Appointment database is ready</code></li>
+      <li>ทดสอบ <code>/นัด</code>, <code>/นัดหมาย</code> และ <code>/ยกเลิกนัด</code> แล้ว</li>
+    </ul>
+  </main>
+</body>
+</html>

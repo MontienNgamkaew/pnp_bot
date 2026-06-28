@@ -1,0 +1,1056 @@
+require("dotenv").config();
+
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const { Readable } = require("node:stream");
+const express = require("express");
+const { google } = require("googleapis");
+const mime = require("mime-types");
+const mysql = require("mysql2/promise");
+
+const {
+  LINE_CHANNEL_SECRET,
+  LINE_CHANNEL_ACCESS_TOKEN,
+  GOOGLE_DRIVE_ROOT_FOLDER_ID,
+  GOOGLE_DRIVE_IMAGE_FOLDER_ID,
+  GOOGLE_DRIVE_VIDEO_FOLDER_ID,
+  GOOGLE_DRIVE_DOCUMENT_FOLDER_ID,
+  SUMMARY_DELAY_SECONDS = 45,
+  REMINDER_MORNING_HOUR = 8,
+  REMINDER_CHECK_INTERVAL_SECONDS = 60,
+  PORT = 3000,
+} = process.env;
+
+const REQUIRED_ENV = [
+  "LINE_CHANNEL_SECRET",
+  "LINE_CHANNEL_ACCESS_TOKEN",
+  "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+];
+
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+}
+
+const app = express();
+const drive = google.drive({ version: "v3", auth: createGoogleAuth() });
+const dbPool = createDatabasePool();
+const folderCache = new Map();
+const activeFolders = new Map();
+const uploadSummaryBatches = new Map();
+const configuredSummaryDelaySeconds = Number(SUMMARY_DELAY_SECONDS);
+const summaryDelayMs =
+  Number.isFinite(configuredSummaryDelaySeconds) && configuredSummaryDelaySeconds > 0
+    ? configuredSummaryDelaySeconds * 1000
+    : 45000;
+const reminderMorningHour = getPositiveInteger(REMINDER_MORNING_HOUR, 8);
+const reminderCheckIntervalMs = getPositiveInteger(REMINDER_CHECK_INTERVAL_SECONDS, 60) * 1000;
+
+app.get("/", (_req, res) => {
+  res.json({ ok: true, service: "pnp-line-drive-bot" });
+});
+
+app.post("/webhook", express.raw({ type: "*/*" }), (req, res) => {
+  if (!isValidLineSignature(req)) {
+    return res.status(401).json({ error: "Invalid LINE signature" });
+  }
+
+  let body;
+  try {
+    body = JSON.parse(req.body.toString("utf8"));
+  } catch (error) {
+    return res.status(400).json({ error: "Invalid JSON payload" });
+  }
+
+  res.sendStatus(200);
+
+  for (const event of body.events || []) {
+    handleLineEvent(event).catch((error) => {
+      console.error("Failed to handle LINE event", {
+        eventId: event.webhookEventId,
+        messageId: event.message && event.message.id,
+        error,
+      });
+
+      notifyUploadFailure(event).catch((notifyError) => {
+        console.error("Failed to notify upload failure", notifyError);
+      });
+    });
+  }
+});
+
+async function handleLineEvent(event) {
+  if (event.type !== "message" || !event.message) {
+    return;
+  }
+
+  if (event.message.type === "text") {
+    await handleTextCommand(event);
+    return;
+  }
+
+  const category = getMessageCategory(event.message);
+  if (!category) {
+    return;
+  }
+
+  const messageId = event.message.id;
+  const duplicate = await findExistingUpload(messageId);
+  if (duplicate) {
+    console.log(`Skip duplicate LINE message ${messageId}`);
+    return;
+  }
+
+  const content = await fetchLineContent(messageId);
+  const organization = getActiveOrganization(event.source);
+  const metadata = buildDriveFileMetadata(event, category, content.contentType, organization);
+  const folderId = await getFolderId(category, organization && organization.folderName);
+  const folderPath = getDriveFolderPath(category, organization);
+
+  await drive.files.create({
+    requestBody: {
+      name: metadata.fileName,
+      parents: [folderId],
+      mimeType: metadata.mimeType,
+      description: metadata.description,
+      appProperties: {
+        lineMessageId: messageId,
+        lineSourceType: event.source && event.source.type ? event.source.type : "",
+        lineSourceId: getSourceId(event.source),
+        organizationFolder: organization ? organization.folderName : "",
+      },
+    },
+    media: {
+      mimeType: metadata.mimeType,
+      body: content.stream,
+    },
+    fields: "id,name,webViewLink",
+  });
+
+  console.log(
+    `Uploaded ${category}${organization ? `/${organization.folderName}` : ""}: ${metadata.fileName}`
+  );
+
+  scheduleUploadSummary(event.source, {
+    category,
+    folderPath,
+    folderId,
+  });
+}
+
+async function handleTextCommand(event) {
+  const command = parseCommand(event.message.text || "");
+  if (!command) {
+    return;
+  }
+
+  if (command.type.startsWith("appointment.")) {
+    await handleAppointmentCommand(event, command);
+    return;
+  }
+
+  if (command.type === "help") {
+    await replyLineMessage(event.replyToken, getHelpMessage());
+    return;
+  }
+
+  if (command.type === "status") {
+    const organization = getActiveOrganization(event.source);
+    await replyLineMessage(
+      event.replyToken,
+      organization
+        ? `หมวดปัจจุบัน: ${organization.folderName}\nไฟล์ถัดไปจะถูกเก็บในโฟลเดอร์ย่อยนี้`
+        : "ยังไม่ได้ตั้งหมวดปัจจุบัน\nใช้ /folder ชื่อหมวด เช่น /folder งานประชุม"
+    );
+    return;
+  }
+
+  if (command.type === "clear") {
+    activeFolders.delete(getSourceKey(event.source));
+    await replyLineMessage(event.replyToken, "ล้างหมวดปัจจุบันแล้ว ไฟล์ถัดไปจะเข้าโฟลเดอร์หลักตามประเภทไฟล์");
+    return;
+  }
+
+  if (command.type === "set") {
+    activeFolders.set(getSourceKey(event.source), {
+      folderName: command.folderName,
+    });
+
+    await replyLineMessage(
+      event.replyToken,
+      `ตั้งหมวดเป็น: ${command.folderName}\nไฟล์ถัดไปจะเข้า Images/${command.folderName}, Videos/${command.folderName}, Documents/${command.folderName}`
+    );
+  }
+}
+
+async function handleAppointmentCommand(event, command) {
+  if (!dbPool) {
+    await replyLineMessage(
+      event.replyToken,
+      "ยังไม่ได้เปิดใช้งานระบบนัดหมาย กรุณาตั้งค่า DB_HOST, DB_USER, DB_PASSWORD และ DB_NAME บน Hostinger"
+    );
+    return;
+  }
+
+  if (command.type === "appointment.help") {
+    await replyLineMessage(event.replyToken, getAppointmentHelpMessage());
+    return;
+  }
+
+  if (command.type === "appointment.create") {
+    await createAppointment(event, command);
+    return;
+  }
+
+  if (command.type === "appointment.list") {
+    await listAppointments(event);
+    return;
+  }
+
+  if (command.type === "appointment.cancel") {
+    await cancelAppointment(event, command.code);
+  }
+}
+
+async function createAppointment(event, command) {
+  const appointmentAt = parseBangkokDateTime(command.appointmentText);
+
+  if (!command.title || !appointmentAt) {
+    await replyLineMessage(event.replyToken, getAppointmentHelpMessage());
+    return;
+  }
+
+  if (appointmentAt.getTime() <= Date.now()) {
+    await replyLineMessage(event.replyToken, "เวลานัดหมายต้องเป็นเวลาในอนาคต");
+    return;
+  }
+
+  const code = await createAppointmentCode();
+
+  await dbPool.execute(
+    `
+      INSERT INTO appointments
+        (appointment_code, source_type, source_id, title, details, appointment_at)
+      VALUES
+        (:code, :sourceType, :sourceId, :title, :details, :appointmentAt)
+    `,
+    {
+      code,
+      sourceType: event.source && event.source.type ? event.source.type : "unknown",
+      sourceId: getSourceId(event.source),
+      title: command.title,
+      details: command.details || null,
+      appointmentAt: toMysqlDateTime(appointmentAt),
+    }
+  );
+
+  await replyLineMessage(
+    event.replyToken,
+    [
+      "บันทึกนัดหมายแล้ว",
+      "",
+      `รหัส: ${code}`,
+      `หัวข้อ: ${command.title}`,
+      `เวลา: ${formatThaiDateTime(appointmentAt)}`,
+      command.details ? `รายละเอียด: ${command.details}` : "",
+      "",
+      `จะแจ้งเตือนเช้าวันนัดหมาย ${String(reminderMorningHour).padStart(2, "0")}:00 และก่อนเวลานัด 10 นาที`,
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
+}
+
+async function listAppointments(event) {
+  const [rows] = await dbPool.execute(
+    `
+      SELECT appointment_code, title, details, appointment_at
+      FROM appointments
+      WHERE source_type = :sourceType
+        AND source_id = :sourceId
+        AND status = 'active'
+        AND appointment_at >= UTC_TIMESTAMP()
+      ORDER BY appointment_at ASC
+      LIMIT 10
+    `,
+    {
+      sourceType: event.source && event.source.type ? event.source.type : "unknown",
+      sourceId: getSourceId(event.source),
+    }
+  );
+
+  if (!rows.length) {
+    await replyLineMessage(event.replyToken, "ยังไม่มีนัดหมายที่กำลังจะมาถึง");
+    return;
+  }
+
+  await replyLineMessage(
+    event.replyToken,
+    [
+      "ตารางนัดหมายที่กำลังจะมาถึง",
+      "",
+      ...rows.map((row) => {
+        const details = row.details ? `\n${row.details}` : "";
+        return `${row.appointment_code} | ${formatThaiDateTime(row.appointment_at)}\n${row.title}${details}`;
+      }),
+    ].join("\n\n")
+  );
+}
+
+async function cancelAppointment(event, code) {
+  const [result] = await dbPool.execute(
+    `
+      UPDATE appointments
+      SET status = 'cancelled'
+      WHERE appointment_code = :code
+        AND source_type = :sourceType
+        AND source_id = :sourceId
+        AND status = 'active'
+    `,
+    {
+      code,
+      sourceType: event.source && event.source.type ? event.source.type : "unknown",
+      sourceId: getSourceId(event.source),
+    }
+  );
+
+  await replyLineMessage(
+    event.replyToken,
+    result.affectedRows > 0 ? `ยกเลิกนัดหมาย ${code} แล้ว` : `ไม่พบนัดหมายรหัส ${code} ในกลุ่มนี้`
+  );
+}
+
+function getAppointmentHelpMessage() {
+  return [
+    "คำสั่งนัดหมาย",
+    "",
+    "/นัด หัวข้อ | YYYY-MM-DD HH:mm | รายละเอียด",
+    "/นัดหมาย",
+    "/ยกเลิกนัด รหัส",
+    "",
+    "ตัวอย่าง:",
+    "/นัด ประชุมโครงการ | 2026-07-05 14:00 | ห้องประชุม A",
+  ].join("\n");
+}
+
+function createGoogleAuth() {
+  const credentials = getGoogleCredentials();
+  return new google.auth.GoogleAuth({
+    credentials,
+    scopes: ["https://www.googleapis.com/auth/drive"],
+  });
+}
+
+function getGoogleCredentials() {
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_BASE64) {
+    const json = Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf8");
+    return normalizeServiceAccount(JSON.parse(json));
+  }
+
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    return normalizeServiceAccount(JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON));
+  }
+
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    const file = fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, "utf8");
+    return normalizeServiceAccount(JSON.parse(file));
+  }
+
+  throw new Error(
+    "Set GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_SERVICE_ACCOUNT_BASE64, or GOOGLE_APPLICATION_CREDENTIALS"
+  );
+}
+
+function normalizeServiceAccount(credentials) {
+  if (credentials.private_key) {
+    credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+  }
+  return credentials;
+}
+
+function createDatabasePool() {
+  const { DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT = 3306 } = process.env;
+
+  if (!DB_HOST || !DB_USER || !DB_NAME) {
+    console.warn("Appointment commands disabled: set DB_HOST, DB_USER, DB_PASSWORD, and DB_NAME");
+    return null;
+  }
+
+  return mysql.createPool({
+    host: DB_HOST,
+    user: DB_USER,
+    password: DB_PASSWORD || "",
+    database: DB_NAME,
+    port: Number(DB_PORT) || 3306,
+    waitForConnections: true,
+    connectionLimit: 5,
+    namedPlaceholders: true,
+    timezone: "Z",
+  });
+}
+
+async function initializeDatabase() {
+  if (!dbPool) {
+    return;
+  }
+
+  await dbPool.execute(`
+    CREATE TABLE IF NOT EXISTS appointments (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      appointment_code VARCHAR(20) NOT NULL UNIQUE,
+      source_type VARCHAR(20) NOT NULL,
+      source_id VARCHAR(80) NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      details TEXT NULL,
+      appointment_at DATETIME NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      morning_reminder_sent TINYINT(1) NOT NULL DEFAULT 0,
+      ten_minute_reminder_sent TINYINT(1) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_appointments_due (status, appointment_at),
+      INDEX idx_appointments_source (source_type, source_id, status)
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+  `);
+
+  console.log("Appointment database is ready");
+}
+
+function getPositiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
+function isValidLineSignature(req) {
+  const signature = req.get("x-line-signature");
+  if (!signature) {
+    return false;
+  }
+
+  const expected = crypto
+    .createHmac("sha256", LINE_CHANNEL_SECRET)
+    .update(req.body)
+    .digest("base64");
+
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+
+  if (signatureBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+}
+
+function getMessageCategory(message) {
+  if (message.type === "image") {
+    return "image";
+  }
+  if (message.type === "video") {
+    return "video";
+  }
+  if (message.type === "file") {
+    return "document";
+  }
+  return null;
+}
+
+function parseCommand(text) {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase();
+
+  const appointmentCommand = parseAppointmentCommand(trimmed);
+  if (appointmentCommand) {
+    return appointmentCommand;
+  }
+
+  if (lower === "/help" || lower === "/folder help" || lower === "/หมวด help") {
+    return { type: "help" };
+  }
+
+  if (lower === "/folder" || lower === "/หมวด" || lower === "/tag") {
+    return { type: "status" };
+  }
+
+  if (
+    lower === "/folder off" ||
+    lower === "/folder clear" ||
+    lower === "/หมวด ปิด" ||
+    lower === "/หมวด ล้าง" ||
+    lower === "/tag off" ||
+    lower === "/tag clear"
+  ) {
+    return { type: "clear" };
+  }
+
+  const match = trimmed.match(/^\/(?:folder|tag|หมวด)\s+(.+)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const folderName = sanitizeDriveFolderName(match[1]);
+  if (!folderName) {
+    return { type: "help" };
+  }
+
+  return { type: "set", folderName };
+}
+
+function parseAppointmentCommand(text) {
+  const lower = text.toLowerCase();
+
+  if (lower === "/นัด help" || lower === "/appointment help") {
+    return { type: "appointment.help" };
+  }
+
+  if (lower === "/นัดหมาย" || lower === "/appointments") {
+    return { type: "appointment.list" };
+  }
+
+  const cancelMatch = text.match(/^\/(?:ยกเลิกนัด|cancelappt)\s+([A-Za-z0-9-]+)$/i);
+  if (cancelMatch) {
+    return { type: "appointment.cancel", code: cancelMatch[1].toUpperCase() };
+  }
+
+  const createMatch = text.match(/^\/(?:นัด|appointment)\s+(.+)$/i);
+  if (!createMatch) {
+    return null;
+  }
+
+  const parts = createMatch[1].split("|").map((part) => part.trim());
+  if (parts.length < 2) {
+    return { type: "appointment.help" };
+  }
+
+  return {
+    type: "appointment.create",
+    title: sanitizePlainText(parts[0], 180),
+    appointmentText: parts[1],
+    details: sanitizePlainText(parts.slice(2).join(" | "), 800),
+  };
+}
+
+function sanitizePlainText(value, maxLength) {
+  return String(value || "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function getHelpMessage() {
+  return [
+    "คำสั่งจัดระเบียบไฟล์",
+    "/folder ชื่อหมวด - ตั้งหมวดสำหรับไฟล์ถัดไป",
+    "/folder - ดูหมวดปัจจุบัน",
+    "/folder off - ปิดหมวดและกลับไปเก็บตามประเภทไฟล์ปกติ",
+    "/help - ดูคำสั่ง",
+    "",
+    "คำสั่งนัดหมาย",
+    "/นัด หัวข้อ | YYYY-MM-DD HH:mm | รายละเอียด",
+    "/นัดหมาย - ดูนัดหมายที่กำลังจะมาถึง",
+    "/ยกเลิกนัด รหัส",
+    "/นัด help - ดูตัวอย่างคำสั่งนัดหมาย",
+    "",
+    "ตัวอย่าง: /folder งานประชุม",
+  ].join("\n");
+}
+
+async function replyLineMessage(replyToken, text) {
+  if (!replyToken) {
+    return;
+  }
+
+  const response = await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [{ type: "text", text }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LINE reply API failed: ${response.status} ${errorText}`);
+  }
+}
+
+async function pushLineMessage(to, text) {
+  if (!to) {
+    return;
+  }
+
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to,
+      messages: [{ type: "text", text }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LINE push API failed: ${response.status} ${errorText}`);
+  }
+}
+
+function scheduleUploadSummary(source, upload) {
+  const sourceKey = getSourceKey(source);
+  const to = getSourceId(source);
+  const batch = uploadSummaryBatches.get(sourceKey) || {
+    to,
+    uploads: [],
+    timer: null,
+  };
+
+  batch.uploads.push(upload);
+
+  if (!batch.timer) {
+    batch.timer = setTimeout(() => {
+      flushUploadSummary(sourceKey).catch((error) => {
+        console.error("Failed to send upload summary", error);
+      });
+    }, summaryDelayMs);
+  }
+
+  uploadSummaryBatches.set(sourceKey, batch);
+}
+
+async function flushUploadSummary(sourceKey) {
+  const batch = uploadSummaryBatches.get(sourceKey);
+  if (!batch) {
+    return;
+  }
+
+  uploadSummaryBatches.delete(sourceKey);
+
+  const message = buildUploadSummaryMessage(batch.uploads);
+  await pushLineMessage(batch.to, message);
+}
+
+function buildUploadSummaryMessage(uploads) {
+  const total = uploads.length;
+  const countsByPath = new Map();
+  const linksByPath = new Map();
+
+  for (const upload of uploads) {
+    countsByPath.set(upload.folderPath, (countsByPath.get(upload.folderPath) || 0) + 1);
+    linksByPath.set(upload.folderPath, getDriveFolderLink(upload.folderId));
+  }
+
+  const lines = [
+    `ทำการบันทึกไฟล์เรียบร้อย ${total} ไฟล์`,
+    "",
+    "สรุป:",
+    ...Array.from(countsByPath.entries()).map(([folderPath, count]) => `${folderPath}: ${count} ไฟล์`),
+    "",
+    "โฟลเดอร์:",
+    ...Array.from(linksByPath.entries()).map(([folderPath, link]) => `${folderPath}: ${link}`),
+  ];
+
+  return lines.join("\n");
+}
+
+async function notifyUploadFailure(event) {
+  if (!event || event.type !== "message" || !event.message || !getMessageCategory(event.message)) {
+    return;
+  }
+
+  await pushLineMessage(
+    getSourceId(event.source),
+    "บันทึกไฟล์ไม่สำเร็จ กรุณาลองส่งใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ"
+  );
+}
+
+async function createAppointmentCode() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = `A-${crypto.randomInt(1000, 10000)}`;
+    const [rows] = await dbPool.execute(
+      "SELECT id FROM appointments WHERE appointment_code = :code LIMIT 1",
+      { code }
+    );
+
+    if (!rows.length) {
+      return code;
+    }
+  }
+
+  return `A-${Date.now().toString(36).toUpperCase()}`;
+}
+
+function parseBangkokDateTime(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, yearText, monthText, dayText, hourText, minuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day, hour - 7, minute, 0));
+  const bangkokParts = getBangkokDateParts(date);
+
+  if (
+    bangkokParts.year !== year ||
+    bangkokParts.month !== month ||
+    bangkokParts.day !== day ||
+    bangkokParts.hour !== hour ||
+    bangkokParts.minute !== minute
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function getBangkokDateParts(date) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(new Date(date)).map((part) => [part.type, part.value]));
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+  };
+}
+
+function toMysqlDateTime(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(
+    date.getUTCHours()
+  )}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+}
+
+function formatThaiDateTime(date) {
+  return new Intl.DateTimeFormat("th-TH", {
+    timeZone: "Asia/Bangkok",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(date));
+}
+
+async function checkAppointmentReminders() {
+  if (!dbPool) {
+    return;
+  }
+
+  await sendMorningReminders();
+  await sendTenMinuteReminders();
+}
+
+async function sendMorningReminders() {
+  const nowParts = getBangkokDateParts(new Date());
+  if (nowParts.hour < reminderMorningHour) {
+    return;
+  }
+
+  const [rows] = await dbPool.execute(
+    `
+      SELECT id, source_id, appointment_code, title, details, appointment_at
+      FROM appointments
+      WHERE status = 'active'
+        AND morning_reminder_sent = 0
+        AND DATE(CONVERT_TZ(appointment_at, '+00:00', '+07:00')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+07:00'))
+        AND appointment_at >= UTC_TIMESTAMP()
+      ORDER BY appointment_at ASC
+      LIMIT 50
+    `
+  );
+
+  for (const appointment of rows) {
+    await pushLineMessage(appointment.source_id, buildMorningReminderMessage(appointment));
+    await dbPool.execute("UPDATE appointments SET morning_reminder_sent = 1 WHERE id = :id", {
+      id: appointment.id,
+    });
+  }
+}
+
+async function sendTenMinuteReminders() {
+  const [rows] = await dbPool.execute(
+    `
+      SELECT id, source_id, appointment_code, title, details, appointment_at
+      FROM appointments
+      WHERE status = 'active'
+        AND ten_minute_reminder_sent = 0
+        AND appointment_at > UTC_TIMESTAMP()
+        AND appointment_at <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL 10 MINUTE)
+      ORDER BY appointment_at ASC
+      LIMIT 50
+    `
+  );
+
+  for (const appointment of rows) {
+    await pushLineMessage(appointment.source_id, buildTenMinuteReminderMessage(appointment));
+    await dbPool.execute("UPDATE appointments SET ten_minute_reminder_sent = 1 WHERE id = :id", {
+      id: appointment.id,
+    });
+  }
+}
+
+function buildMorningReminderMessage(appointment) {
+  return [
+    "แจ้งเตือนนัดหมายวันนี้",
+    "",
+    `${appointment.appointment_code} | ${formatThaiDateTime(appointment.appointment_at)}`,
+    appointment.title,
+    appointment.details || "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildTenMinuteReminderMessage(appointment) {
+  return [
+    "อีก 10 นาทีถึงเวลานัดหมาย",
+    "",
+    `${appointment.appointment_code} | ${formatThaiDateTime(appointment.appointment_at)}`,
+    appointment.title,
+    appointment.details || "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function fetchLineContent(messageId) {
+  const response = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+    headers: {
+      Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`LINE content API failed: ${response.status} ${text}`);
+  }
+
+  return {
+    contentType: response.headers.get("content-type") || "application/octet-stream",
+    stream: Readable.fromWeb(response.body),
+  };
+}
+
+function buildDriveFileMetadata(event, category, contentType, organization) {
+  const message = event.message;
+  const sourceId = getSourceId(event.source);
+  const timestamp = new Date(event.timestamp || Date.now()).toISOString().replace(/[:.]/g, "-");
+  const originalName = message.type === "file" ? message.fileName : "";
+  const extension = getExtension(category, contentType, originalName);
+  const safeOriginalName = originalName ? sanitizeFileName(originalName) : "";
+  const fileName = safeOriginalName || `${timestamp}_${sourceId}_${message.id}${extension}`;
+  const mimeType = mime.lookup(fileName) || contentType || "application/octet-stream";
+
+  return {
+    fileName,
+    mimeType,
+    description: [
+      `LINE message ID: ${message.id}`,
+      `Source: ${event.source ? event.source.type : "unknown"} ${sourceId}`,
+      `Sent at: ${new Date(event.timestamp || Date.now()).toISOString()}`,
+      organization ? `Organization folder: ${organization.folderName}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+}
+
+function getExtension(category, contentType, originalName) {
+  if (originalName && path.extname(originalName)) {
+    return "";
+  }
+
+  const fromMime = mime.extension(contentType);
+  if (fromMime) {
+    return `.${fromMime}`;
+  }
+
+  if (category === "image") {
+    return ".jpg";
+  }
+  if (category === "video") {
+    return ".mp4";
+  }
+  return "";
+}
+
+function sanitizeFileName(fileName) {
+  const parsed = path.parse(fileName);
+  const base = parsed.name.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 120);
+  const ext = parsed.ext.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 20);
+  return `${base || "line-file"}${ext}`;
+}
+
+function sanitizeDriveFolderName(folderName) {
+  return folderName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim().slice(0, 80);
+}
+
+function getDriveFolderPath(category, organization) {
+  const categoryFolderName = {
+    image: "Images",
+    video: "Videos",
+    document: "Documents",
+  }[category];
+
+  if (!organization) {
+    return categoryFolderName;
+  }
+
+  return `${categoryFolderName}/${organization.folderName}`;
+}
+
+function getDriveFolderLink(folderId) {
+  return `https://drive.google.com/drive/folders/${folderId}`;
+}
+
+async function getFolderId(category, organizationFolderName) {
+  const configured = {
+    image: GOOGLE_DRIVE_IMAGE_FOLDER_ID,
+    video: GOOGLE_DRIVE_VIDEO_FOLDER_ID,
+    document: GOOGLE_DRIVE_DOCUMENT_FOLDER_ID,
+  }[category];
+
+  if (configured) {
+    if (!organizationFolderName) {
+      return configured;
+    }
+
+    return getOrCreateFolder(organizationFolderName, configured);
+  }
+
+  const folderName = {
+    image: "Images",
+    video: "Videos",
+    document: "Documents",
+  }[category];
+
+  const categoryFolderId = await getOrCreateFolder(folderName, GOOGLE_DRIVE_ROOT_FOLDER_ID);
+
+  if (!organizationFolderName) {
+    return categoryFolderId;
+  }
+
+  return getOrCreateFolder(organizationFolderName, categoryFolderId);
+}
+
+async function getOrCreateFolder(folderName, parentFolderId) {
+  const cacheKey = `${parentFolderId}:${folderName}`;
+
+  if (folderCache.has(cacheKey)) {
+    return folderCache.get(cacheKey);
+  }
+
+  const escapedName = folderName.replace(/'/g, "\\'");
+  const list = await drive.files.list({
+    q: [
+      `'${parentFolderId}' in parents`,
+      `name = '${escapedName}'`,
+      "mimeType = 'application/vnd.google-apps.folder'",
+      "trashed = false",
+    ].join(" and "),
+    fields: "files(id,name)",
+    pageSize: 1,
+  });
+
+  const existing = list.data.files && list.data.files[0];
+  if (existing) {
+    folderCache.set(cacheKey, existing.id);
+    return existing.id;
+  }
+
+  const created = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentFolderId],
+    },
+    fields: "id",
+  });
+
+  folderCache.set(cacheKey, created.data.id);
+  return created.data.id;
+}
+
+async function findExistingUpload(messageId) {
+  const escapedMessageId = messageId.replace(/'/g, "\\'");
+  const result = await drive.files.list({
+    q: `appProperties has { key='lineMessageId' and value='${escapedMessageId}' } and trashed = false`,
+    fields: "files(id,name)",
+    pageSize: 1,
+  });
+
+  return result.data.files && result.data.files[0];
+}
+
+function getActiveOrganization(source) {
+  const sourceKey = getSourceKey(source);
+  const organization = activeFolders.get(sourceKey);
+  return organization || null;
+}
+
+function getSourceKey(source = {}) {
+  return `${source.type || "unknown"}:${getSourceId(source)}`;
+}
+
+function getSourceId(source = {}) {
+  return source.groupId || source.roomId || source.userId || "unknown-source";
+}
+
+async function start() {
+  await initializeDatabase();
+
+  if (dbPool) {
+    setInterval(() => {
+      checkAppointmentReminders().catch((error) => {
+        console.error("Failed to check appointment reminders", error);
+      });
+    }, reminderCheckIntervalMs);
+
+    checkAppointmentReminders().catch((error) => {
+      console.error("Failed to check appointment reminders", error);
+    });
+  }
+
+  app.listen(PORT, () => {
+    console.log(`LINE Drive bot listening on port ${PORT}`);
+  });
+}
+
+start().catch((error) => {
+  console.error("Failed to start server", error);
+  process.exit(1);
+});

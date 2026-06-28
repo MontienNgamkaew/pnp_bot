@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>วิธีใช้งาน LINE Drive Bot</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      line-height: 1.65;
+      color: #1f2937;
+      background: #f6f7f9;
+    }
+
+    main {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+      background: #ffffff;
+      min-height: 100vh;
+    }
+
+    h1, h2 {
+      line-height: 1.25;
+      color: #111827;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 30px;
+    }
+
+    h2 {
+      margin-top: 32px;
+      font-size: 22px;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 24px;
+    }
+
+    code, pre {
+      font-family: Consolas, Monaco, monospace;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 14px;
+      border-radius: 6px;
+      background: #111827;
+      color: #f9fafb;
+    }
+
+    code {
+      background: #eef2f7;
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+
+    pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+    }
+
+    .note {
+      border-left: 4px solid #2563eb;
+      background: #eff6ff;
+      padding: 12px 14px;
+      border-radius: 4px;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>วิธีใช้งาน LINE Drive Bot</h1>
+
+    <p>
+      ระบบนี้ใช้สำหรับเก็บไฟล์ที่สมาชิกส่งในกลุ่ม LINE ลง Google Drive อัตโนมัติ
+      โดยแยกเป็นโฟลเดอร์ <code>Images</code>, <code>Videos</code>, และ <code>Documents</code>
+    </p>
+
+    <h2>1. เตรียม Google Drive</h2>
+    <ol>
+      <li>เข้า Google Cloud Console</li>
+      <li>สร้าง Project ใหม่ หรือใช้ Project เดิม</li>
+      <li>เปิดใช้งาน <code>Google Drive API</code></li>
+      <li>สร้าง <code>Service Account</code></li>
+      <li>สร้าง key แบบ JSON แล้วดาวน์โหลดไฟล์เก็บไว้</li>
+      <li>เปิด Google Drive แล้วสร้างโฟลเดอร์หลัก เช่น <code>LINE Group Files</code></li>
+      <li>แชร์โฟลเดอร์หลักให้ email ของ Service Account เป็น <code>Editor</code></li>
+      <li>คัดลอก Folder ID จาก URL ของโฟลเดอร์</li>
+    </ol>
+
+    <p>ตัวอย่าง URL ของโฟลเดอร์ Google Drive:</p>
+    <pre><code>https://drive.google.com/drive/folders/1AbCdEfGh12345</code></pre>
+    <p>ค่า <code>1AbCdEfGh12345</code> คือค่าที่ต้องนำไปใส่ใน <code>GOOGLE_DRIVE_ROOT_FOLDER_ID</code></p>
+
+    <h2>2. เตรียม LINE Bot</h2>
+    <ol>
+      <li>เข้า LINE Developers Console</li>
+      <li>สร้าง Provider และ Messaging API Channel</li>
+      <li>คัดลอกค่า <code>Channel secret</code></li>
+      <li>สร้างหรือคัดลอก <code>Channel access token</code></li>
+      <li>เปิดใช้งาน webhook</li>
+      <li>ปิด Auto-reply messages ถ้าไม่ต้องการให้บอตตอบข้อความเอง</li>
+      <li>เพิ่มบอตเข้าไปในกลุ่ม LINE ที่ต้องการเก็บไฟล์</li>
+    </ol>
+
+    <h2>3. ตั้งค่าไฟล์ .env</h2>
+    <p>คัดลอกไฟล์ตัวอย่าง:</p>
+    <pre><code>cp .env.example .env</code></pre>
+
+    <p>แก้ไขไฟล์ <code>.env</code> ให้มีค่าประมาณนี้:</p>
+    <pre><code>PORT=3000
+
+LINE_CHANNEL_SECRET=ใส่_channel_secret
+LINE_CHANNEL_ACCESS_TOKEN=ใส่_channel_access_token
+
+GOOGLE_DRIVE_ROOT_FOLDER_ID=ใส่_google_drive_folder_id
+
+GOOGLE_SERVICE_ACCOUNT_BASE64=ใส่_service_account_json_แบบ_base64</code></pre>
+
+    <p>แนะนำให้ใช้ credential แบบ base64 เพราะใส่ในไฟล์ <code>.env</code> ง่ายกว่า JSON หลายบรรทัด:</p>
+    <pre><code>base64 -w 0 service-account.json</code></pre>
+
+    <p>จากนั้นนำผลลัพธ์ที่ได้ไปใส่ใน <code>GOOGLE_SERVICE_ACCOUNT_BASE64</code></p>
+
+    <h2>4. ติดตั้งและรันระบบ</h2>
+    <p>ติดตั้ง dependencies:</p>
+    <pre><code>npm install</code></pre>
+
+    <p>รันระบบ:</p>
+    <pre><code>npm start</code></pre>
+
+    <p>ถ้ารันสำเร็จ จะเห็นข้อความประมาณนี้:</p>
+    <pre><code>LINE Drive bot listening on port 3000</code></pre>
+
+    <h2>5. เปิดให้ LINE เรียก webhook ได้</h2>
+    <p>
+      LINE ต้องเรียก webhook ผ่าน URL ที่เข้าถึงจากอินเทอร์เน็ตได้และเป็น HTTPS
+      ถ้าทดสอบบนเครื่องตัวเอง ให้ใช้ ngrok หรือ cloudflared
+    </p>
+
+    <p>ตัวอย่างใช้ ngrok:</p>
+    <pre><code>ngrok http 3000</code></pre>
+
+    <p>นำ URL ที่ได้ไปตั้งใน LINE Developers โดยเติม <code>/webhook</code> ต่อท้าย:</p>
+    <pre><code>https://xxxx.ngrok-free.app/webhook</code></pre>
+
+    <h2>6. ทดสอบใช้งาน</h2>
+    <ol>
+      <li>เพิ่มบอตเข้าไปในกลุ่ม LINE</li>
+      <li>ส่งรูปภาพในกลุ่ม แล้วตรวจโฟลเดอร์ <code>Images</code></li>
+      <li>ส่งวิดีโอในกลุ่ม แล้วตรวจโฟลเดอร์ <code>Videos</code></li>
+      <li>ส่งไฟล์ PDF, Word, Excel หรือไฟล์อื่น แล้วตรวจโฟลเดอร์ <code>Documents</code></li>
+    </ol>
+
+    <h2>7. โครงสร้างไฟล์บน Google Drive</h2>
+    <pre><code>LINE Group Files/
+  Images/
+  Videos/
+  Documents/</code></pre>
+
+    <h2>8. คำสั่งจัดระเบียบไฟล์</h2>
+    <p>ส่งคำสั่งในกลุ่ม LINE เพื่อกำหนดหมวดสำหรับไฟล์ที่จะส่งต่อจากนั้น:</p>
+    <pre><code>/folder งานประชุม</code></pre>
+
+    <p>หลังจากตั้งหมวดแล้ว ไฟล์ถัดไปจะเข้าโฟลเดอร์ย่อยตามประเภทไฟล์:</p>
+    <pre><code>LINE Group Files/
+  Images/
+    งานประชุม/
+  Videos/
+    งานประชุม/
+  Documents/
+    งานประชุม/</code></pre>
+
+    <p>คำสั่งที่ใช้ได้:</p>
+    <pre><code>/folder       ดูหมวดปัจจุบัน
+/folder off   ปิดหมวดปัจจุบัน
+/help         ดูคำสั่งทั้งหมด</code></pre>
+
+    <p>
+      ถ้าไม่ใช้คำสั่ง <code>/folder</code> ไฟล์จะถูกเก็บในโฟลเดอร์ปกติตามประเภทไฟล์
+      ถ้าตั้งหมวดที่ยังไม่มีโฟลเดอร์อยู่ ระบบจะสร้างโฟลเดอร์ให้อัตโนมัติ
+      เมื่อใช้งานหมวดเสร็จ ให้พิมพ์ <code>/folder off</code>
+    </p>
+
+    <p>หลังอัปโหลดสำเร็จ บอตจะรอช่วงสั้น ๆ แล้วสรุปผลเป็นข้อความเดียวพร้อมลิงก์โฟลเดอร์ Google Drive:</p>
+    <pre><code>ทำการบันทึกไฟล์เรียบร้อย 10 ไฟล์
+
+สรุป:
+Images/งานประชุม: 6 ไฟล์
+Videos/งานประชุม: 2 ไฟล์
+Documents/งานประชุม: 2 ไฟล์
+
+โฟลเดอร์:
+Images/งานประชุม: https://drive.google.com/drive/folders/...
+Videos/งานประชุม: https://drive.google.com/drive/folders/...
+Documents/งานประชุม: https://drive.google.com/drive/folders/...</code></pre>
+
+    <p>
+      ค่าเริ่มต้นจะรอ 45 วินาทีก่อนส่งสรุป ปรับได้ด้วยค่า <code>SUMMARY_DELAY_SECONDS</code>
+      ถ้าบันทึกไฟล์ไม่สำเร็จ บอตจะแจ้ง error ในกลุ่ม
+    </p>
+
+    <p>
+      ถ้าต้องการให้สมาชิกในกลุ่มเปิดลิงก์ได้ ต้องแชร์โฟลเดอร์ Google Drive ให้สมาชิกเหล่านั้น
+      หรือปรับสิทธิ์เป็น anyone with the link ตามนโยบายความปลอดภัยของคุณ
+    </p>
+
+    <h2>9. คำสั่งนัดหมายในกลุ่ม</h2>
+    <p>คำสั่งนัดหมายต้องตั้งค่า MySQL ก่อนใช้งาน เพื่อให้ข้อมูลนัดหมายไม่หายหลัง server restart</p>
+
+    <p>รูปแบบเวลาที่ใช้ในคำสั่งคือ <code>YYYY-MM-DD HH:mm</code> และอ้างอิงเวลาไทย <code>Asia/Bangkok</code></p>
+
+    <p>สร้างนัดหมาย:</p>
+    <pre><code>/นัด ประชุมโครงการ | 2026-07-05 14:00 | ห้องประชุม A</code></pre>
+
+    <p>ดูนัดหมายที่กำลังจะมาถึง:</p>
+    <pre><code>/นัดหมาย</code></pre>
+
+    <p>ยกเลิกนัดหมาย:</p>
+    <pre><code>/ยกเลิกนัด A-1234</code></pre>
+
+    <p>บอตจะแจ้งเตือนในกลุ่ม 2 ครั้ง:</p>
+    <pre><code>เช้าวันนัดหมาย เวลา 08:00
+ก่อนเวลานัดหมาย 10 นาที</code></pre>
+
+    <p>ตัวแปรที่เกี่ยวข้อง:</p>
+    <pre><code>DB_HOST=your_mysql_host
+DB_PORT=3306
+DB_USER=your_mysql_user
+DB_PASSWORD=your_mysql_password
+DB_NAME=your_mysql_database
+
+REMINDER_MORNING_HOUR=8
+REMINDER_CHECK_INTERVAL_SECONDS=60</code></pre>
+
+    <p>วิธีทดสอบหลัง deploy:</p>
+    <ol>
+      <li>พิมพ์ <code>/นัด help</code> ในกลุ่ม LINE</li>
+      <li>สร้างนัดหมายทดสอบที่อยู่ในอนาคต เช่น อีก 15 นาที</li>
+      <li>พิมพ์ <code>/นัดหมาย</code> เพื่อตรวจว่าบอตบันทึกนัดหมายแล้ว</li>
+      <li>รอให้บอตแจ้งเตือนก่อนเวลานัดหมาย 10 นาที</li>
+      <li>ทดสอบยกเลิกด้วย <code>/ยกเลิกนัด รหัส</code></li>
+    </ol>
+
+    <p>
+      ถ้ายังไม่ได้ตั้งค่า MySQL บอตยังเก็บไฟล์ได้ตามปกติ แต่คำสั่งนัดหมายจะยังใช้งานไม่ได้
+      การแจ้งเตือนใช้ LINE push message จึงนับรวมกับ quota/แพ็กเกจข้อความของ LINE Official Account
+    </p>
+
+    <h2>10. ปัญหาที่พบบ่อย</h2>
+    <p><strong>Webhook Verify ไม่ผ่าน:</strong> ตรวจว่า URL ลงท้ายด้วย <code>/webhook</code> และ server รันอยู่</p>
+    <p><strong>ขึ้น Invalid LINE signature:</strong> ตรวจค่า <code>LINE_CHANNEL_SECRET</code> ว่าตรงกับ channel ที่ใช้จริง</p>
+    <p><strong>อัปโหลดเข้า Drive ไม่ได้:</strong> ตรวจว่าแชร์โฟลเดอร์หลักให้ email ของ Service Account เป็น Editor แล้ว</p>
+    <p><strong>ไม่เห็นไฟล์ใน Drive:</strong> ตรวจ log ของ server และตรวจว่าไฟล์ที่ส่งเป็นรูป วิดีโอ หรือไฟล์แนบจริง</p>
+    <p><strong>คำสั่งนัดหมายบอกว่ายังไม่ได้เปิดใช้งาน:</strong> ตรวจค่า <code>DB_HOST</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code>, และ <code>DB_NAME</code> บน Hostinger</p>
+    <p><strong>แจ้งเตือนไม่เข้า:</strong> ตรวจ log ของ server, ตรวจว่า app ยัง Running และตรวจว่า LINE push message ยังไม่เกิน quota</p>
+
+    <div class="note">
+      หลัง deploy จริง แนะนำให้ใช้ URL ถาวร เช่น Render, Railway, Fly.io, VPS หรือ platform อื่นที่รองรับ HTTPS
+      แล้วนำ URL ถาวรนั้นไปตั้งเป็น webhook ใน LINE Developers
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "pnp-line-drive-bot",
+  "version": "1.0.0",
+  "description": "LINE webhook bot that archives group attachments to Google Drive by file type.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "googleapis": "^173.0.0",
+    "mime-types": "^2.1.35",
+    "mysql2": "^3.22.5"
+  }
+}
