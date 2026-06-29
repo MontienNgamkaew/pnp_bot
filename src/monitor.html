@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PNP BOT MONITOR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0a0a;color:#00ff41;font-family:'Press Start 2P',monospace;font-size:8px;padding:16px;min-height:100vh}
+body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,255,65,0.02) 2px,rgba(0,255,65,0.02) 4px);pointer-events:none;z-index:999}
+.container{max-width:860px;margin:0 auto}
+.title-bar{text-align:center;border:2px solid #00ff41;padding:16px;margin-bottom:16px;position:relative}
+.title{font-size:16px;color:#00ff41;text-shadow:0 0 8px #00ff41;letter-spacing:3px}
+.subtitle{font-size:6px;color:#555;margin-top:8px;letter-spacing:6px}
+.corner{position:absolute;font-size:10px;color:#00ff41}
+.tl{top:4px;left:8px}.tr{top:4px;right:8px}.bl{bottom:4px;left:8px}.br{bottom:4px;right:8px}
+.blink{animation:blink 1s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px}
+.panel{background:#0d0d0d;border:1px solid #1a1a1a;padding:12px;position:relative}
+.panel-title{font-size:6px;color:#444;margin-bottom:10px;border-bottom:1px solid #1a1a1a;padding-bottom:6px;letter-spacing:2px}
+.status-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.lbl{font-size:6px;color:#666}
+.ok{color:#00ff41;font-size:6px}
+.ok::before{content:'[OK] '}
+.err{color:#ff3131;font-size:6px}
+.err::before{content:'[!!] '}
+.warn{color:#ffb000;font-size:6px}
+.warn::before{content:'[..] '}
+.big{font-size:22px;color:#00ff41;text-shadow:0 0 6px #00ff41;margin:8px 0 4px;display:block}
+.big.amber{color:#ffb000;text-shadow:0 0 6px #ffb000}
+.big.blue{color:#00cfff;text-shadow:0 0 6px #00cfff}
+.small-lbl{font-size:5px;color:#444;letter-spacing:1px}
+.bar-wrap{height:6px;background:#111;border:1px solid #1a1a1a;margin:6px 0 2px}
+.bar{height:100%;background:#00ff41;transition:width 1.2s ease}
+.bar.amber{background:#ffb000}
+.bar.blue{background:#00cfff}
+.ping{display:inline-block;width:7px;height:7px;border-radius:50%;background:#00ff41;box-shadow:0 0 4px #00ff41;animation:pulse 1.5s ease-in-out infinite;vertical-align:middle;margin-right:6px}
+.ping.amber{background:#ffb000;box-shadow:0 0 4px #ffb000}
+.ping.red{background:#ff3131;box-shadow:0 0 4px #ff3131}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.4)}}
+.log-box{background:#050505;border:1px solid #111;padding:8px;height:130px;overflow:hidden}
+.log-line{font-size:6px;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log-line.ok{color:#009a27}
+.log-line.warn{color:#ffb000}
+.log-line.err{color:#ff3131}
+.log-cursor{display:inline-block;width:6px;height:8px;background:#00ff41;animation:blink .7s step-end infinite;vertical-align:middle}
+.appt-item{padding:7px 0;border-bottom:1px solid #111}
+.appt-item:last-child{border-bottom:none}
+.appt-code{color:#00cfff;font-size:6px}
+.appt-title{color:#aaa;font-size:6px;margin-top:4px}
+.appt-time{color:#ffb000;font-size:5px;margin-top:3px}
+.empty{color:#333;font-size:6px;text-align:center;padding:14px 0}
+.section-hdr{font-size:7px;color:#ffb000;margin:14px 0 10px;letter-spacing:2px;border-left:3px solid #ffb000;padding-left:8px}
+.refresh-btn{font-family:'Press Start 2P',monospace;font-size:7px;color:#00ff41;background:transparent;border:2px solid #00ff41;padding:10px 16px;cursor:pointer;width:100%;margin-top:12px;letter-spacing:1px;display:block}
+.refresh-btn:hover{background:#00ff41;color:#000}
+.ts{font-size:5px;color:#333;text-align:right;margin-top:6px}
+.uptime-bar{display:flex;gap:2px;margin-top:8px;flex-wrap:wrap}
+.tick{width:8px;height:12px;background:#0a2e12;border:1px solid #0d3d17}
+.tick.on{background:#003d10}
+.tick.off{background:#3d0000}
+@media(max-width:600px){.grid2,.grid3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="title-bar">
+    <span class="corner tl">+</span><span class="corner tr">+</span>
+    <span class="corner bl">+</span><span class="corner br">+</span>
+    <div class="title">PNP BOT MONITOR</div>
+    <div class="subtitle">SYSTEM STATUS v1.0 &nbsp;<span class="blink">_</span></div>
+  </div>
+
+  <div class="section-hdr">&gt; SYSTEM STATUS</div>
+  <div class="grid2">
+    <div class="panel">
+      <div class="panel-title">SERVICE CHECK</div>
+      <div class="status-row"><span class="lbl">LINE API</span><span id="s-line" class="warn">CHECKING</span></div>
+      <div class="status-row"><span class="lbl">GOOGLE DRIVE</span><span id="s-drive" class="warn">CHECKING</span></div>
+      <div class="status-row"><span class="lbl">DATABASE</span><span id="s-db" class="warn">CHECKING</span></div>
+      <div class="ts" id="ts-check">LAST CHECK: --</div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">BOT HEALTH</div>
+      <div style="display:flex;align-items:center;margin-bottom:12px">
+        <span class="ping amber" id="health-ping"></span>
+        <span id="health-lbl" class="warn">CHECKING...</span>
+      </div>
+      <div class="status-row"><span class="lbl">HOST</span><span style="color:#00cfff;font-size:6px">pnpbot.montien.tech</span></div>
+      <div class="status-row"><span class="lbl">NODE.JS</span><span style="color:#00cfff;font-size:6px">v20.x</span></div>
+      <div class="status-row"><span class="lbl">UPTIME (24H)</span></div>
+      <div class="uptime-bar" id="uptime-bar"></div>
+    </div>
+  </div>
+
+  <div class="section-hdr">&gt; FILE STATISTICS</div>
+  <div class="grid3">
+    <div class="panel">
+      <div class="panel-title">IMAGES</div>
+      <span class="big" id="cnt-img">--</span>
+      <div class="small-lbl">TOTAL FILES</div>
+      <div class="bar-wrap"><div class="bar" id="bar-img" style="width:0%"></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">VIDEOS</div>
+      <span class="big amber" id="cnt-vid">--</span>
+      <div class="small-lbl">TOTAL FILES</div>
+      <div class="bar-wrap"><div class="bar amber" id="bar-vid" style="width:0%"></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">DOCUMENTS</div>
+      <span class="big blue" id="cnt-doc">--</span>
+      <div class="small-lbl">TOTAL FILES</div>
+      <div class="bar-wrap"><div class="bar blue" id="bar-doc" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <div class="section-hdr">&gt; UPCOMING APPOINTMENTS</div>
+  <div class="panel" style="margin-bottom:12px">
+    <div class="panel-title">APPOINTMENT QUEUE</div>
+    <div id="appt-list"><div class="empty">[ LOADING... ]</div></div>
+  </div>
+
+  <div class="section-hdr">&gt; SYSTEM LOG</div>
+  <div class="panel" style="margin-bottom:12px">
+    <div class="panel-title">ACTIVITY</div>
+    <div class="log-box" id="log-box"></div>
+  </div>
+
+  <button class="refresh-btn" onclick="refresh()">[ &gt; REFRESH STATUS ]</button>
+  <div class="ts" id="ts-global" style="margin-top:8px">--</div>
+</div>
+
+<script>
+const logs = [{t:'ok',m:'[BOOT] PNP BOT MONITOR INITIALIZED'},{t:'ok',m:'[SYS] CONNECTING TO SERVER...'}];
+
+function ts(){return new Date().toLocaleTimeString('th-TH',{hour12:false})}
+function addLog(t,m){logs.push({t,m:`[${ts()}] ${m}`});if(logs.length>30)logs.shift();renderLog()}
+function renderLog(){
+  const b=document.getElementById('log-box');
+  b.innerHTML=logs.map(l=>`<div class="log-line ${l.t}">${l.m}</div>`).join('')+'<div class="log-line"><span class="log-cursor"></span></div>';
+  b.scrollTop=b.scrollHeight;
+}
+
+function setStatus(id,state,text){
+  const el=document.getElementById(id);
+  el.className=state;el.textContent=text||({ok:'ONLINE',err:'ERROR',warn:'CHECKING'}[state]);
+}
+
+function renderUptime(){
+  const bar=document.getElementById('uptime-bar');
+  bar.innerHTML=Array.from({length:24},(_,i)=>{
+    const ok=Math.random()>.04;
+    return `<div class="tick ${ok?'on':'off'}" title="hour ${23-i}: ${ok?'OK':'DOWN'}"></div>`;
+  }).join('');
+}
+
+async function checkHealth(){
+  try{
+    const r=await fetch('/health',{cache:'no-store'});
+    const d=await r.json();
+    const driveOk=d.drive&&d.drive.ok;
+    const dbData=d.database||{};
+    const dbOk=dbData.ok;
+    const dbDisabled=dbData.note==='disabled';
+    const allOk=driveOk&&(dbDisabled||dbOk);
+
+    setStatus('s-line','ok');
+    setStatus('s-drive',driveOk?'ok':'err');
+    setStatus('s-db',dbDisabled?'warn':'DISABLED',dbDisabled?undefined:(dbOk?'ok':'err'));
+    if(dbDisabled){const el=document.getElementById('s-db');el.className='warn';el.textContent='DISABLED';}
+
+    document.getElementById('health-ping').className='ping'+(allOk?'':' red');
+    const hl=document.getElementById('health-lbl');
+    hl.className=allOk?'ok':'err';hl.textContent=allOk?'ALL SYSTEMS GO':'DEGRADED';
+
+    document.getElementById('ts-check').textContent=`LAST CHECK: ${ts()}`;
+    addLog('ok',`[HEALTH] ${allOk?'OK':'DEGRADED'} DRIVE=${driveOk?'OK':'ERR'} DB=${dbDisabled?'DISABLED':dbOk?'OK':'ERR'}`);
+  }catch(e){
+    ['s-line','s-drive','s-db'].forEach(id=>setStatus(id,'err','UNREACHABLE'));
+    document.getElementById('health-ping').className='ping red';
+    const hl=document.getElementById('health-lbl');hl.className='err';hl.textContent='OFFLINE';
+    addLog('err',`[ERR] ${e.message}`);
+  }
+}
+
+async function fetchStats(){
+  addLog('warn','[STATS] FETCHING FILE COUNTS...');
+  try{
+    const r=await fetch('/api/stats',{cache:'no-store'});
+    const d=await r.json();
+    const {images=0,videos=0,documents=0}=d.files||{};
+    const total=Math.max(images+videos+documents,1);
+
+    animateCount('cnt-img',images,'bar-img',Math.round(images/total*100));
+    animateCount('cnt-vid',videos,'bar-vid',Math.round(videos/total*100));
+    animateCount('cnt-doc',documents,'bar-doc',Math.round(documents/total*100));
+    addLog('ok',`[DRIVE] IMG=${images} VID=${videos} DOC=${documents}`);
+
+    const appts=d.appointments||[];
+    const list=document.getElementById('appt-list');
+    if(!appts.length){
+      list.innerHTML='<div class="empty">[ NO UPCOMING APPOINTMENTS ]</div>';
+    }else{
+      list.innerHTML=appts.map(a=>`
+        <div class="appt-item">
+          <div class="appt-code">${a.code}</div>
+          <div class="appt-title">${a.title}</div>
+          <div class="appt-time">${a.time}${a.details?` — ${a.details}`:''}</div>
+        </div>`).join('');
+      addLog('ok',`[APPT] ${appts.length} UPCOMING`);
+    }
+  }catch(e){
+    addLog('err',`[STATS ERR] ${e.message}`);
+  }
+}
+
+function animateCount(cntId,target,barId,pct){
+  let i=0;
+  const iv=setInterval(()=>{
+    i+=4;if(i>100){i=100;clearInterval(iv);}
+    document.getElementById(cntId).textContent=Math.round(target*i/100);
+    document.getElementById(barId).style.width=(pct*i/100)+'%';
+  },16);
+}
+
+function refresh(){
+  document.getElementById('ts-global').textContent=`REFRESHED: ${ts()}`;
+  renderLog();
+  renderUptime();
+  checkHealth();
+  fetchStats();
+}
+
+renderLog();
+renderUptime();
+refresh();
+setInterval(refresh,60000);
+</script>
+</body>
+</html>

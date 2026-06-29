@@ -49,7 +49,15 @@ const reminderMorningHour = getPositiveInteger(REMINDER_MORNING_HOUR, 8);
 const reminderCheckIntervalMs = getPositiveInteger(REMINDER_CHECK_INTERVAL_SECONDS, 60) * 1000;
 
 app.get("/", (_req, res) => {
-  res.json({ ok: true, service: "PNP BOT" });
+  res.sendFile(path.join(__dirname, "monitor.html"));
+});
+
+app.get("/api/stats", (_req, res) => {
+  fetchStats().then((result) => {
+    res.json(result);
+  }).catch((err) => {
+    res.status(500).json({ error: err.message });
+  });
 });
 
 app.get("/health", (_req, res) => {
@@ -89,6 +97,67 @@ async function checkDatabase() {
   }
   await dbPool.execute("SELECT 1");
   return { ok: true };
+}
+
+async function fetchStats() {
+  const [images, videos, documents, appointments] = await Promise.allSettled([
+    countDriveFiles("image"),
+    countDriveFiles("video"),
+    countDriveFiles("document"),
+    fetchUpcomingAppointments(),
+  ]);
+
+  return {
+    files: {
+      images: images.status === "fulfilled" ? images.value : 0,
+      videos: videos.status === "fulfilled" ? videos.value : 0,
+      documents: documents.status === "fulfilled" ? documents.value : 0,
+    },
+    appointments: appointments.status === "fulfilled" ? appointments.value : [],
+  };
+}
+
+async function countDriveFiles(category) {
+  const folderName = { image: "Images", video: "Videos", document: "Documents" }[category];
+  const list = await drive.files.list({
+    q: `'${GOOGLE_DRIVE_ROOT_FOLDER_ID}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: "files(id)",
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  const folder = list.data.files && list.data.files[0];
+  if (!folder) return 0;
+
+  const files = await drive.files.list({
+    q: `'${folder.id}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: "files(id)",
+    pageSize: 1000,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  return (files.data.files && files.data.files.length) || 0;
+}
+
+async function fetchUpcomingAppointments() {
+  if (!dbPool) return [];
+
+  const [rows] = await dbPool.execute(`
+    SELECT appointment_code, title, details, appointment_at
+    FROM appointments
+    WHERE status = 'active' AND appointment_at >= UTC_TIMESTAMP()
+    ORDER BY appointment_at ASC
+    LIMIT 5
+  `);
+
+  return rows.map((r) => ({
+    code: r.appointment_code,
+    title: r.title,
+    details: r.details || "",
+    time: formatThaiDateTime(r.appointment_at),
+  }));
 }
 
 app.post("/webhook", express.raw({ type: "*/*" }), (req, res) => {
