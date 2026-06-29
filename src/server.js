@@ -797,13 +797,15 @@ async function buildUploadSummaryMessage(uploads) {
     folderIdByPath.set(upload.folderPath, upload.folderId);
   }
 
-  const folderLines = Array.from(folderIdByPath.entries()).map(([folderPath, folderId]) => {
-    const count = countsByPath.get(folderPath);
-    const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
-    const thaiPath = folderPath.replace("Images", "รูปภาพ").replace("Videos", "วิดีโอ").replace("Documents", "เอกสาร");
-    const shortUrl = await shortenUrl(getDriveFolderLink(folderId));
-    return `${icon} ${thaiPath} (${count} ไฟล์)\n🔗 ${shortUrl}`;
-  });
+  const folderLines = await Promise.all(
+    Array.from(folderIdByPath.entries()).map(async ([folderPath, folderId]) => {
+      const count = countsByPath.get(folderPath);
+      const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
+      const thaiPath = folderPath.replace("Images", "รูปภาพ").replace("Videos", "วิดีโอ").replace("Documents", "เอกสาร");
+      const shortUrl = await shortenUrl(getDriveFolderLink(folderId));
+      return `${icon} ${thaiPath} (${count} ไฟล์)\n🔗 ${shortUrl}`;
+    })
+  );
 
   return [
     `✅ บันทึกไฟล์สำเร็จ ${total} ไฟล์`,
