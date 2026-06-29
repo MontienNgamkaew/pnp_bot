@@ -783,11 +783,11 @@ async function flushUploadSummary(sourceKey) {
 
   uploadSummaryBatches.delete(sourceKey);
 
-  const message = await buildUploadSummaryMessage(batch.uploads);
+  const message = buildUploadSummaryMessage(batch.uploads);
   await pushLineMessage(batch.to, message);
 }
 
-async function buildUploadSummaryMessage(uploads) {
+function buildUploadSummaryMessage(uploads) {
   const total = uploads.length;
   const countsByPath = new Map();
   const folderIdByPath = new Map();
@@ -797,35 +797,18 @@ async function buildUploadSummaryMessage(uploads) {
     folderIdByPath.set(upload.folderPath, upload.folderId);
   }
 
-  const folderLines = await Promise.all(
-    Array.from(folderIdByPath.entries()).map(async ([folderPath, folderId]) => {
-      const count = countsByPath.get(folderPath);
-      const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
-      const thaiPath = folderPath.replace("Images", "รูปภาพ").replace("Videos", "วิดีโอ").replace("Documents", "เอกสาร");
-      const shortUrl = await shortenUrl(getDriveFolderLink(folderId));
-      return `${icon} ${thaiPath} (${count} ไฟล์)\n🔗 ${shortUrl}`;
-    })
-  );
+  const folderLines = Array.from(folderIdByPath.entries()).map(([folderPath, folderId]) => {
+    const count = countsByPath.get(folderPath);
+    const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
+    const thaiPath = folderPath.replace("Images", "รูปภาพ").replace("Videos", "วิดีโอ").replace("Documents", "เอกสาร");
+    return `${icon} ${thaiPath} (${count} ไฟล์)\n🔗 ${getDriveFolderLink(folderId)}`;
+  });
 
   return [
     `✅ บันทึกไฟล์สำเร็จ ${total} ไฟล์`,
     "─────────────────",
     ...folderLines,
   ].join("\n");
-}
-
-async function shortenUrl(url) {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (res.ok) {
-      const short = await res.text();
-      if (short.startsWith("http")) return short.trim();
-    }
-  } catch (_) {}
-  return url;
 }
 
 async function notifyUploadFailure(event) {
