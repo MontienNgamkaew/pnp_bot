@@ -80,7 +80,7 @@ async function checkHealth() {
 }
 
 async function checkDrive() {
-  await drive.files.list({ pageSize: 1, fields: "files(id)", q: "trashed = false" });
+  await drive.files.list({ pageSize: 1, fields: "files(id)", q: "trashed = false", supportsAllDrives: true, includeItemsFromAllDrives: true });
 }
 
 async function checkDatabase() {
@@ -166,6 +166,7 @@ async function handleLineEvent(event) {
       body: content.stream,
     },
     fields: "id,name,webViewLink",
+    supportsAllDrives: true,
   });
 
   console.log(
@@ -1064,6 +1065,8 @@ async function getOrCreateFolder(folderName, parentFolderId) {
     ].join(" and "),
     fields: "files(id,name)",
     pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   });
 
   const existing = list.data.files && list.data.files[0];
@@ -1079,6 +1082,7 @@ async function getOrCreateFolder(folderName, parentFolderId) {
       parents: [parentFolderId],
     },
     fields: "id",
+    supportsAllDrives: true,
   });
 
   folderCache.set(cacheKey, created.data.id);
@@ -1091,6 +1095,8 @@ async function findExistingUpload(messageId) {
     q: `appProperties has { key='lineMessageId' and value='${escapedMessageId}' } and trashed = false`,
     fields: "files(id,name)",
     pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   });
 
   return result.data.files && result.data.files[0];
