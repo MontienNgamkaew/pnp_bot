@@ -783,11 +783,11 @@ async function flushUploadSummary(sourceKey) {
 
   uploadSummaryBatches.delete(sourceKey);
 
-  const message = await buildUploadSummaryMessage(batch.uploads);
+  const message = buildUploadSummaryMessage(batch.uploads);
   await pushLineMessage(batch.to, message);
 }
 
-async function buildUploadSummaryMessage(uploads) {
+function buildUploadSummaryMessage(uploads) {
   const total = uploads.length;
   const countsByPath = new Map();
   const folderIdByPath = new Map();
@@ -797,34 +797,17 @@ async function buildUploadSummaryMessage(uploads) {
     folderIdByPath.set(upload.folderPath, upload.folderId);
   }
 
-  const folderLines = await Promise.all(
-    Array.from(folderIdByPath.entries()).map(async ([folderPath, folderId]) => {
-      const shortUrl = await shortenUrl(getDriveFolderLink(folderId));
-      const count = countsByPath.get(folderPath);
-      const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
-      return `${icon} ${folderPath} (${count} ไฟล์)\n🔗 ${shortUrl}`;
-    })
-  );
+  const folderLines = Array.from(folderIdByPath.entries()).map(([folderPath, folderId]) => {
+    const count = countsByPath.get(folderPath);
+    const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
+    return `${icon} ${folderPath} (${count} ไฟล์)\n🔗 ${getDriveFolderLink(folderId)}`;
+  });
 
   return [
     `✅ บันทึกไฟล์สำเร็จ ${total} ไฟล์`,
     "─────────────────",
     ...folderLines,
   ].join("\n");
-}
-
-async function shortenUrl(url) {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(url)}`, { signal: controller.signal });
-    clearTimeout(timer);
-    if (res.ok) {
-      const short = await res.text();
-      if (short.startsWith("http")) return short.trim();
-    }
-  } catch (_) {}
-  return url;
 }
 
 async function notifyUploadFailure(event) {
