@@ -52,6 +52,45 @@ app.get("/", (_req, res) => {
   res.json({ ok: true, service: "PNP BOT" });
 });
 
+app.get("/health", (_req, res) => {
+  checkHealth().then((result) => {
+    res.status(result.ok ? 200 : 503).json(result);
+  });
+});
+
+async function checkHealth() {
+  const checks = await Promise.allSettled([checkDrive(), checkDatabase()]);
+  const [driveResult, dbResult] = checks;
+
+  const drive =
+    driveResult.status === "fulfilled"
+      ? { ok: true }
+      : { ok: false, error: driveResult.reason?.message || "unknown" };
+
+  const database =
+    dbResult.status === "fulfilled"
+      ? dbResult.value
+      : { ok: false, error: dbResult.reason?.message || "unknown" };
+
+  return {
+    ok: drive.ok && database.ok,
+    drive,
+    database,
+  };
+}
+
+async function checkDrive() {
+  await drive.files.list({ pageSize: 1, fields: "files(id)", q: "trashed = false" });
+}
+
+async function checkDatabase() {
+  if (!dbPool) {
+    return { ok: true, note: "disabled" };
+  }
+  await dbPool.execute("SELECT 1");
+  return { ok: true };
+}
+
 app.post("/webhook", express.raw({ type: "*/*" }), (req, res) => {
   if (!isValidLineSignature(req)) {
     return res.status(401).json({ error: "Invalid LINE signature" });
@@ -168,15 +207,17 @@ async function handleTextCommand(event) {
   }
 
   if (command.type === "clear") {
-    activeFolders.delete(getSourceKey(event.source));
+    const sourceKey = getSourceKey(event.source);
+    activeFolders.delete(sourceKey);
+    await persistActiveFolder(sourceKey, null);
     await replyLineMessage(event.replyToken, "ล้างหมวดปัจจุบันแล้ว ไฟล์ถัดไปจะเข้าโฟลเดอร์หลักตามประเภทไฟล์");
     return;
   }
 
   if (command.type === "set") {
-    activeFolders.set(getSourceKey(event.source), {
-      folderName: command.folderName,
-    });
+    const sourceKey = getSourceKey(event.source);
+    activeFolders.set(sourceKey, { folderName: command.folderName });
+    await persistActiveFolder(sourceKey, command.folderName);
 
     await replyLineMessage(
       event.replyToken,
@@ -391,10 +432,49 @@ function createDatabasePool() {
   });
 }
 
+async function persistActiveFolder(sourceKey, folderName) {
+  if (!dbPool) {
+    return;
+  }
+
+  if (!folderName) {
+    await dbPool.execute("DELETE FROM active_folders WHERE source_key = :sourceKey", { sourceKey });
+    return;
+  }
+
+  await dbPool.execute(
+    `INSERT INTO active_folders (source_key, folder_name)
+     VALUES (:sourceKey, :folderName)
+     ON DUPLICATE KEY UPDATE folder_name = :folderName`,
+    { sourceKey, folderName }
+  );
+}
+
+async function loadActiveFolders() {
+  if (!dbPool) {
+    return;
+  }
+
+  const [rows] = await dbPool.execute("SELECT source_key, folder_name FROM active_folders");
+  for (const row of rows) {
+    activeFolders.set(row.source_key, { folderName: row.folder_name });
+  }
+
+  console.log(`Loaded ${rows.length} active folder(s) from database`);
+}
+
 async function initializeDatabase() {
   if (!dbPool) {
     return;
   }
+
+  await dbPool.execute(`
+    CREATE TABLE IF NOT EXISTS active_folders (
+      source_key VARCHAR(120) NOT NULL PRIMARY KEY,
+      folder_name VARCHAR(80) NOT NULL,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+  `);
 
   await dbPool.execute(`
     CREATE TABLE IF NOT EXISTS appointments (
@@ -1032,6 +1112,7 @@ function getSourceId(source = {}) {
 
 async function start() {
   await initializeDatabase();
+  await loadActiveFolders();
 
   if (dbPool) {
     setInterval(() => {
