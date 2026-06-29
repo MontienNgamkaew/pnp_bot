@@ -201,8 +201,8 @@ async function handleTextCommand(event) {
     await replyLineMessage(
       event.replyToken,
       organization
-        ? `หมวดปัจจุบัน: ${organization.folderName}\nไฟล์ถัดไปจะถูกเก็บในโฟลเดอร์ย่อยนี้`
-        : "ยังไม่ได้ตั้งหมวดปัจจุบัน\nใช้ /folder ชื่อหมวด เช่น /folder งานประชุม"
+        ? `📂 หมวดปัจจุบัน: ${organization.folderName}\nไฟล์ถัดไปจะเข้าโฟลเดอร์ย่อยนี้`
+        : "📂 ยังไม่ได้ตั้งหมวด\nใช้ /folder ชื่อหมวด เช่น /folder งานประชุม"
     );
     return;
   }
@@ -211,7 +211,7 @@ async function handleTextCommand(event) {
     const sourceKey = getSourceKey(event.source);
     activeFolders.delete(sourceKey);
     await persistActiveFolder(sourceKey, null);
-    await replyLineMessage(event.replyToken, "ล้างหมวดปัจจุบันแล้ว ไฟล์ถัดไปจะเข้าโฟลเดอร์หลักตามประเภทไฟล์");
+    await replyLineMessage(event.replyToken, "🗂 ล้างหมวดแล้ว\nไฟล์ถัดไปจะเข้าโฟลเดอร์หลักตามประเภทไฟล์");
     return;
   }
 
@@ -222,7 +222,7 @@ async function handleTextCommand(event) {
 
     await replyLineMessage(
       event.replyToken,
-      `ตั้งหมวดเป็น: ${command.folderName}\nไฟล์ถัดไปจะเข้า Images/${command.folderName}, Videos/${command.folderName}, Documents/${command.folderName}`
+      `✅ ตั้งหมวด: ${command.folderName}\n🖼 Images/${command.folderName}\n🎬 Videos/${command.folderName}\n📄 Documents/${command.folderName}`
     );
   }
 }
@@ -291,14 +291,14 @@ async function createAppointment(event, command) {
   await replyLineMessage(
     event.replyToken,
     [
-      "บันทึกนัดหมายแล้ว",
+      "✅ บันทึกนัดหมายแล้ว",
+      "─────────────────",
+      `📌 ${command.title}`,
+      `🕐 ${formatThaiDateTime(appointmentAt)}`,
+      `🔖 รหัส: ${code}`,
+      command.details ? `📝 ${command.details}` : "",
       "",
-      `รหัส: ${code}`,
-      `หัวข้อ: ${command.title}`,
-      `เวลา: ${formatThaiDateTime(appointmentAt)}`,
-      command.details ? `รายละเอียด: ${command.details}` : "",
-      "",
-      `จะแจ้งเตือนเช้าวันนัดหมาย ${String(reminderMorningHour).padStart(2, "0")}:00 และก่อนเวลานัด 10 นาที`,
+      `🔔 แจ้งเตือน ${String(reminderMorningHour).padStart(2, "0")}:00 และก่อนนัด 10 นาที`,
     ]
       .filter(Boolean)
       .join("\n")
@@ -331,11 +331,11 @@ async function listAppointments(event) {
   await replyLineMessage(
     event.replyToken,
     [
-      "ตารางนัดหมายที่กำลังจะมาถึง",
-      "",
+      "📅 นัดหมายที่กำลังจะมาถึง",
+      "─────────────────",
       ...rows.map((row) => {
-        const details = row.details ? `\n${row.details}` : "";
-        return `${row.appointment_code} | ${formatThaiDateTime(row.appointment_at)}\n${row.title}${details}`;
+        const details = row.details ? `\n📝 ${row.details}` : "";
+        return `📌 ${row.title}\n🕐 ${formatThaiDateTime(row.appointment_at)}\n🔖 ${row.appointment_code}${details}`;
       }),
     ].join("\n\n")
   );
@@ -360,19 +360,19 @@ async function cancelAppointment(event, code) {
 
   await replyLineMessage(
     event.replyToken,
-    result.affectedRows > 0 ? `ยกเลิกนัดหมาย ${code} แล้ว` : `ไม่พบนัดหมายรหัส ${code} ในกลุ่มนี้`
+    result.affectedRows > 0 ? `✅ ยกเลิกนัดหมาย ${code} แล้ว` : `❌ ไม่พบนัดหมายรหัส ${code} ในกลุ่มนี้`
   );
 }
 
 function getAppointmentHelpMessage() {
   return [
-    "คำสั่งนัดหมาย",
-    "",
+    "📅 คำสั่งนัดหมาย",
+    "─────────────────",
     "/นัด หัวข้อ | YYYY-MM-DD HH:mm | รายละเอียด",
-    "/นัดหมาย",
+    "/นัดหมาย — ดูตารางนัดหมาย",
     "/ยกเลิกนัด รหัส",
     "",
-    "ตัวอย่าง:",
+    "💡 ตัวอย่าง",
     "/นัด ประชุมโครงการ | 2026-07-05 14:00 | ห้องประชุม A",
   ].join("\n");
 }
@@ -622,19 +622,19 @@ function sanitizePlainText(value, maxLength) {
 
 function getHelpMessage() {
   return [
-    "คำสั่งจัดระเบียบไฟล์",
-    "/folder ชื่อหมวด - ตั้งหมวดสำหรับไฟล์ถัดไป",
-    "/folder - ดูหมวดปัจจุบัน",
-    "/folder off - ปิดหมวดและกลับไปเก็บตามประเภทไฟล์ปกติ",
-    "/help - ดูคำสั่ง",
+    "📂 จัดระเบียบไฟล์",
+    "/folder ชื่อหมวด — ตั้งหมวด",
+    "/folder — ดูหมวดปัจจุบัน",
+    "/folder off — ปิดหมวด",
     "",
-    "คำสั่งนัดหมาย",
+    "📅 นัดหมาย",
     "/นัด หัวข้อ | YYYY-MM-DD HH:mm | รายละเอียด",
-    "/นัดหมาย - ดูนัดหมายที่กำลังจะมาถึง",
+    "/นัดหมาย — ดูนัดหมายที่กำลังจะมาถึง",
     "/ยกเลิกนัด รหัส",
-    "/นัด help - ดูตัวอย่างคำสั่งนัดหมาย",
     "",
-    "ตัวอย่าง: /folder งานประชุม",
+    "💡 ตัวอย่าง",
+    "/folder งานประชุม",
+    "/นัด ประชุม Q3 | 2026-07-10 14:00 | ห้อง A",
   ].join("\n");
 }
 
@@ -714,31 +714,45 @@ async function flushUploadSummary(sourceKey) {
 
   uploadSummaryBatches.delete(sourceKey);
 
-  const message = buildUploadSummaryMessage(batch.uploads);
+  const message = await buildUploadSummaryMessage(batch.uploads);
   await pushLineMessage(batch.to, message);
 }
 
-function buildUploadSummaryMessage(uploads) {
+async function buildUploadSummaryMessage(uploads) {
   const total = uploads.length;
   const countsByPath = new Map();
-  const linksByPath = new Map();
+  const folderIdByPath = new Map();
 
   for (const upload of uploads) {
     countsByPath.set(upload.folderPath, (countsByPath.get(upload.folderPath) || 0) + 1);
-    linksByPath.set(upload.folderPath, getDriveFolderLink(upload.folderId));
+    folderIdByPath.set(upload.folderPath, upload.folderId);
   }
 
-  const lines = [
-    `ทำการบันทึกไฟล์เรียบร้อย ${total} ไฟล์`,
-    "",
-    "สรุป:",
-    ...Array.from(countsByPath.entries()).map(([folderPath, count]) => `${folderPath}: ${count} ไฟล์`),
-    "",
-    "โฟลเดอร์:",
-    ...Array.from(linksByPath.entries()).map(([folderPath, link]) => `${folderPath}: ${link}`),
-  ];
+  const folderLines = await Promise.all(
+    Array.from(folderIdByPath.entries()).map(async ([folderPath, folderId]) => {
+      const shortUrl = await shortenUrl(getDriveFolderLink(folderId));
+      const count = countsByPath.get(folderPath);
+      const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
+      return `${icon} ${folderPath} (${count} ไฟล์)\n🔗 ${shortUrl}`;
+    })
+  );
 
-  return lines.join("\n");
+  return [
+    `✅ บันทึกไฟล์สำเร็จ ${total} ไฟล์`,
+    "─────────────────",
+    ...folderLines,
+  ].join("\n");
+}
+
+async function shortenUrl(url) {
+  try {
+    const res = await fetch(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(url)}`);
+    if (res.ok) {
+      const short = await res.text();
+      if (short.startsWith("http")) return short.trim();
+    }
+  } catch (_) {}
+  return url;
 }
 
 async function notifyUploadFailure(event) {
@@ -748,7 +762,7 @@ async function notifyUploadFailure(event) {
 
   await pushLineMessage(
     getSourceId(event.source),
-    "บันทึกไฟล์ไม่สำเร็จ กรุณาลองส่งใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ"
+    "❌ บันทึกไฟล์ไม่สำเร็จ\nกรุณาลองส่งใหม่อีกครั้ง หรือติดต่อผู้ดูแลระบบ"
   );
 }
 
@@ -906,11 +920,12 @@ async function sendTenMinuteReminders() {
 
 function buildMorningReminderMessage(appointment) {
   return [
-    "แจ้งเตือนนัดหมายวันนี้",
-    "",
-    `${appointment.appointment_code} | ${formatThaiDateTime(appointment.appointment_at)}`,
-    appointment.title,
-    appointment.details || "",
+    "🌅 แจ้งเตือนนัดหมายวันนี้",
+    "─────────────────",
+    `📌 ${appointment.title}`,
+    `🕐 ${formatThaiDateTime(appointment.appointment_at)}`,
+    `🔖 รหัส: ${appointment.appointment_code}`,
+    appointment.details ? `📝 ${appointment.details}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -918,11 +933,12 @@ function buildMorningReminderMessage(appointment) {
 
 function buildTenMinuteReminderMessage(appointment) {
   return [
-    "อีก 10 นาทีถึงเวลานัดหมาย",
-    "",
-    `${appointment.appointment_code} | ${formatThaiDateTime(appointment.appointment_at)}`,
-    appointment.title,
-    appointment.details || "",
+    "⏰ อีก 10 นาทีถึงเวลานัดหมาย!",
+    "─────────────────",
+    `📌 ${appointment.title}`,
+    `🕐 ${formatThaiDateTime(appointment.appointment_at)}`,
+    `🔖 รหัส: ${appointment.appointment_code}`,
+    appointment.details ? `📝 ${appointment.details}` : "",
   ]
     .filter(Boolean)
     .join("\n");
