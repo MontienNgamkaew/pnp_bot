@@ -815,7 +815,10 @@ async function buildUploadSummaryMessage(uploads) {
 
 async function shortenUrl(url) {
   try {
-    const res = await fetch(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(url)}`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(url)}`, { signal: controller.signal });
+    clearTimeout(timer);
     if (res.ok) {
       const short = await res.text();
       if (short.startsWith("http")) return short.trim();
