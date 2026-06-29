@@ -291,7 +291,7 @@ async function handleTextCommand(event) {
 
     await replyLineMessage(
       event.replyToken,
-      `✅ ตั้งหมวด: ${command.folderName}\n🖼 Images/${command.folderName}\n🎬 Videos/${command.folderName}\n📄 Documents/${command.folderName}`
+      `✅ ตั้งหมวด: ${command.folderName}\n🖼 รูปภาพ/${command.folderName}\n🎬 วิดีโอ/${command.folderName}\n📄 เอกสาร/${command.folderName}`
     );
   }
 }
@@ -800,7 +800,8 @@ function buildUploadSummaryMessage(uploads) {
   const folderLines = Array.from(folderIdByPath.entries()).map(([folderPath, folderId]) => {
     const count = countsByPath.get(folderPath);
     const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
-    return `${icon} ${folderPath} (${count} ไฟล์)\n🔗 ${getDriveFolderLink(folderId)}`;
+    const thaiPath = folderPath.replace("Images", "รูปภาพ").replace("Videos", "วิดีโอ").replace("Documents", "เอกสาร");
+    return `${icon} ${thaiPath} (${count} ไฟล์)\n🔗 ${getDriveFolderLink(folderId)}`;
   });
 
   return [
