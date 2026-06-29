@@ -783,11 +783,11 @@ async function flushUploadSummary(sourceKey) {
 
   uploadSummaryBatches.delete(sourceKey);
 
-  const message = buildUploadSummaryMessage(batch.uploads);
+  const message = await buildUploadSummaryMessage(batch.uploads);
   await pushLineMessage(batch.to, message);
 }
 
-function buildUploadSummaryMessage(uploads) {
+async function buildUploadSummaryMessage(uploads) {
   const total = uploads.length;
   const countsByPath = new Map();
   const folderIdByPath = new Map();
@@ -801,7 +801,8 @@ function buildUploadSummaryMessage(uploads) {
     const count = countsByPath.get(folderPath);
     const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
     const thaiPath = folderPath.replace("Images", "รูปภาพ").replace("Videos", "วิดีโอ").replace("Documents", "เอกสาร");
-    return `${icon} ${thaiPath} (${count} ไฟล์)\n🔗 ${getDriveFolderLink(folderId)}`;
+    const shortUrl = await shortenUrl(getDriveFolderLink(folderId));
+    return `${icon} ${thaiPath} (${count} ไฟล์)\n🔗 ${shortUrl}`;
   });
 
   return [
@@ -809,6 +810,20 @@ function buildUploadSummaryMessage(uploads) {
     "─────────────────",
     ...folderLines,
   ].join("\n");
+}
+
+async function shortenUrl(url) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      const short = await res.text();
+      if (short.startsWith("http")) return short.trim();
+    }
+  } catch (_) {}
+  return url;
 }
 
 async function notifyUploadFailure(event) {
