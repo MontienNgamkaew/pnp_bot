@@ -242,7 +242,7 @@ async function handleLineEvent(event) {
     `Uploaded ${category}${organization ? `/${organization.folderName}` : ""}: ${metadata.fileName}`
   );
 
-  scheduleUploadSummary(event.source, {
+  scheduleUploadSummary(event.source, event.replyToken, {
     category,
     folderPath,
     folderId,
@@ -753,24 +753,23 @@ async function pushLineMessage(to, text) {
   }
 }
 
-function scheduleUploadSummary(source, upload) {
+function scheduleUploadSummary(source, replyToken, upload) {
   const sourceKey = getSourceKey(source);
-  const to = getSourceId(source);
   const batch = uploadSummaryBatches.get(sourceKey) || {
-    to,
+    replyToken: null,
     uploads: [],
     timer: null,
   };
 
   batch.uploads.push(upload);
+  if (replyToken) batch.replyToken = replyToken;
 
-  if (!batch.timer) {
-    batch.timer = setTimeout(() => {
-      flushUploadSummary(sourceKey).catch((error) => {
-        console.error("Failed to send upload summary", error);
-      });
-    }, summaryDelayMs);
-  }
+  if (batch.timer) clearTimeout(batch.timer);
+  batch.timer = setTimeout(() => {
+    flushUploadSummary(sourceKey).catch((error) => {
+      console.error("Failed to send upload summary", error);
+    });
+  }, summaryDelayMs);
 
   uploadSummaryBatches.set(sourceKey, batch);
 }
@@ -784,7 +783,7 @@ async function flushUploadSummary(sourceKey) {
   uploadSummaryBatches.delete(sourceKey);
 
   const message = buildUploadSummaryMessage(batch.uploads);
-  await pushLineMessage(batch.to, message);
+  await replyLineMessage(batch.replyToken, message);
 
   if (activeFolders.has(sourceKey)) {
     activeFolders.delete(sourceKey);
