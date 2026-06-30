@@ -8,70 +8,83 @@
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#0a0a0a;color:#00ff41;font-family:'Press Start 2P',monospace;font-size:8px;padding:16px;min-height:100vh}
+body{background:#0a0a0a;color:#00ff41;font-family:'Press Start 2P',monospace;font-size:10px;padding:20px;min-height:100vh}
 body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,255,65,0.02) 2px,rgba(0,255,65,0.02) 4px);pointer-events:none;z-index:999}
-.container{max-width:860px;margin:0 auto}
-.title-bar{text-align:center;border:2px solid #00ff41;padding:16px;margin-bottom:16px;position:relative}
-.title{font-size:16px;color:#00ff41;text-shadow:0 0 8px #00ff41;letter-spacing:3px}
-.subtitle{font-size:6px;color:#555;margin-top:8px;letter-spacing:6px}
-.corner{position:absolute;font-size:10px;color:#00ff41}
+.container{max-width:1075px;margin:0 auto;padding-bottom:60px;position:relative;z-index:2}
+.title-bar{text-align:center;border:2px solid #00ff41;padding:20px;margin-bottom:20px;position:relative;overflow:visible}
+.title-inner{display:flex;align-items:center;justify-content:center;gap:20px}
+.title{font-size:20px;color:#00ff41;text-shadow:0 0 8px #00ff41;letter-spacing:3px}
+.subtitle{font-size:7px;color:#555;margin-top:8px;letter-spacing:6px}
+.corner{position:absolute;font-size:13px;color:#00ff41}
 .tl{top:4px;left:8px}.tr{top:4px;right:8px}.bl{bottom:4px;left:8px}.br{bottom:4px;right:8px}
 .blink{animation:blink 1s step-end infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px}
-.panel{background:#0d0d0d;border:1px solid #1a1a1a;padding:12px;position:relative}
-.panel-title{font-size:6px;color:#444;margin-bottom:10px;border-bottom:1px solid #1a1a1a;padding-bottom:6px;letter-spacing:2px}
-.status-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.lbl{font-size:6px;color:#666}
-.ok{color:#00ff41;font-size:6px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:15px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px;margin-bottom:15px}
+.panel{background:#0d0d0d;border:1px solid #1a1a1a;padding:15px;position:relative}
+.panel-title{font-size:7px;color:#444;margin-bottom:10px;border-bottom:1px solid #1a1a1a;padding-bottom:6px;letter-spacing:2px}
+.status-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.lbl{font-size:7px;color:#666}
+.ok{color:#00ff41;font-size:7px}
 .ok::before{content:'[OK] '}
-.err{color:#ff3131;font-size:6px}
+.err{color:#ff3131;font-size:7px}
 .err::before{content:'[!!] '}
-.warn{color:#ffb000;font-size:6px}
+.warn{color:#ffb000;font-size:7px}
 .warn::before{content:'[..] '}
-.big{font-size:22px;color:#00ff41;text-shadow:0 0 6px #00ff41;margin:8px 0 4px;display:block}
+.big{font-size:28px;color:#00ff41;text-shadow:0 0 6px #00ff41;margin:10px 0 5px;display:block}
 .big.amber{color:#ffb000;text-shadow:0 0 6px #ffb000}
 .big.blue{color:#00cfff;text-shadow:0 0 6px #00cfff}
-.small-lbl{font-size:5px;color:#444;letter-spacing:1px}
-.bar-wrap{height:6px;background:#111;border:1px solid #1a1a1a;margin:6px 0 2px}
+.small-lbl{font-size:6px;color:#444;letter-spacing:1px}
+.bar-wrap{height:8px;background:#111;border:1px solid #1a1a1a;margin:8px 0 3px}
 .bar{height:100%;background:#00ff41;transition:width 1.2s ease}
 .bar.amber{background:#ffb000}
 .bar.blue{background:#00cfff}
-.ping{display:inline-block;width:7px;height:7px;border-radius:50%;background:#00ff41;box-shadow:0 0 4px #00ff41;animation:pulse 1.5s ease-in-out infinite;vertical-align:middle;margin-right:6px}
+.ping{display:inline-block;width:9px;height:9px;border-radius:50%;background:#00ff41;box-shadow:0 0 4px #00ff41;animation:pulse 1.5s ease-in-out infinite;vertical-align:middle;margin-right:6px}
 .ping.amber{background:#ffb000;box-shadow:0 0 4px #ffb000}
 .ping.red{background:#ff3131;box-shadow:0 0 4px #ff3131}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.4)}}
-.log-box{background:#050505;border:1px solid #111;padding:8px;height:130px;overflow:hidden}
-.log-line{font-size:6px;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log-box{background:#050505;border:1px solid #111;padding:8px;height:163px;overflow:hidden}
+.log-line{font-size:7px;margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .log-line.ok{color:#009a27}
 .log-line.warn{color:#ffb000}
 .log-line.err{color:#ff3131}
-.log-cursor{display:inline-block;width:6px;height:8px;background:#00ff41;animation:blink .7s step-end infinite;vertical-align:middle}
-.appt-item{padding:7px 0;border-bottom:1px solid #111}
+.log-cursor{display:inline-block;width:8px;height:10px;background:#00ff41;animation:blink .7s step-end infinite;vertical-align:middle}
+.appt-item{padding:9px 0;border-bottom:1px solid #111}
 .appt-item:last-child{border-bottom:none}
-.appt-code{color:#00cfff;font-size:6px}
-.appt-title{color:#aaa;font-size:6px;margin-top:4px}
-.appt-time{color:#ffb000;font-size:5px;margin-top:3px}
-.empty{color:#333;font-size:6px;text-align:center;padding:14px 0}
-.section-hdr{font-size:7px;color:#ffb000;margin:14px 0 10px;letter-spacing:2px;border-left:3px solid #ffb000;padding-left:8px}
-.refresh-btn{font-family:'Press Start 2P',monospace;font-size:7px;color:#00ff41;background:transparent;border:2px solid #00ff41;padding:10px 16px;cursor:pointer;width:100%;margin-top:12px;letter-spacing:1px;display:block}
+.appt-code{color:#00cfff;font-size:7px}
+.appt-title{color:#aaa;font-size:7px;margin-top:5px}
+.appt-time{color:#ffb000;font-size:6px;margin-top:4px}
+.empty{color:#333;font-size:7px;text-align:center;padding:18px 0}
+.section-hdr{font-size:9px;color:#ffb000;margin:18px 0 13px;letter-spacing:2px;border-left:4px solid #ffb000;padding-left:10px}
+.refresh-btn{font-family:'Press Start 2P',monospace;font-size:9px;color:#00ff41;background:transparent;border:2px solid #00ff41;padding:13px 20px;cursor:pointer;width:100%;margin-top:15px;letter-spacing:1px;display:block}
 .refresh-btn:hover{background:#00ff41;color:#000}
-.ts{font-size:5px;color:#333;text-align:right;margin-top:6px}
-.uptime-bar{display:flex;gap:2px;margin-top:8px;flex-wrap:wrap}
-.tick{width:8px;height:12px;background:#0a2e12;border:1px solid #0d3d17}
+.ts{font-size:6px;color:#333;text-align:right;margin-top:6px}
+.uptime-bar{display:flex;gap:3px;margin-top:10px;flex-wrap:wrap}
+.tick{width:10px;height:15px;background:#0a2e12;border:1px solid #0d3d17}
 .tick.on{background:#003d10}
 .tick.off{background:#3d0000}
+#robot-canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+#matrix-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;opacity:0.04}
+#runner-strip{position:fixed;bottom:0;left:0;width:100%;height:40px;pointer-events:none;z-index:998;overflow:hidden;border-top:1px solid #0d0d0d}
+#runner-canvas{position:absolute;bottom:6px;image-rendering:pixelated;image-rendering:crisp-edges}
 @media(max-width:600px){.grid2,.grid3{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
+<canvas id="matrix-canvas"></canvas>
+
 <div class="container">
   <div class="title-bar">
     <span class="corner tl">+</span><span class="corner tr">+</span>
     <span class="corner bl">+</span><span class="corner br">+</span>
-    <div class="title">PNP BOT MONITOR</div>
-    <div class="subtitle">SYSTEM STATUS v1.0 &nbsp;<span class="blink">_</span></div>
+    <div class="title-inner">
+      <canvas id="robot-canvas" width="32" height="56"></canvas>
+      <div>
+        <div class="title">PNP BOT MONITOR</div>
+        <div class="subtitle">SYSTEM STATUS v1.0 &nbsp;<span class="blink">_</span></div>
+      </div>
+      <canvas id="robot-canvas-r" width="32" height="56"></canvas>
+    </div>
   </div>
 
   <div class="section-hdr">&gt; SYSTEM STATUS</div>
@@ -89,8 +102,8 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backg
         <span class="ping amber" id="health-ping"></span>
         <span id="health-lbl" class="warn">CHECKING...</span>
       </div>
-      <div class="status-row"><span class="lbl">HOST</span><span style="color:#00cfff;font-size:6px">pnpbot.montien.tech</span></div>
-      <div class="status-row"><span class="lbl">NODE.JS</span><span style="color:#00cfff;font-size:6px">v20.x</span></div>
+      <div class="status-row"><span class="lbl">HOST</span><span style="color:#00cfff;font-size:7px">pnpbot.montien.tech</span></div>
+      <div class="status-row"><span class="lbl">NODE.JS</span><span style="color:#00cfff;font-size:7px">v20.x</span></div>
       <div class="status-row"><span class="lbl">UPTIME (24H)</span></div>
       <div class="uptime-bar" id="uptime-bar"></div>
     </div>
@@ -119,13 +132,13 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backg
   </div>
 
   <div class="section-hdr">&gt; UPCOMING APPOINTMENTS</div>
-  <div class="panel" style="margin-bottom:12px">
+  <div class="panel" style="margin-bottom:15px">
     <div class="panel-title">APPOINTMENT QUEUE</div>
     <div id="appt-list"><div class="empty">[ LOADING... ]</div></div>
   </div>
 
   <div class="section-hdr">&gt; SYSTEM LOG</div>
-  <div class="panel" style="margin-bottom:12px">
+  <div class="panel" style="margin-bottom:15px">
     <div class="panel-title">ACTIVITY</div>
     <div class="log-box" id="log-box"></div>
   </div>
@@ -134,7 +147,150 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backg
   <div class="ts" id="ts-global" style="margin-top:8px">--</div>
 </div>
 
+<div id="runner-strip">
+  <canvas id="runner-canvas" width="24" height="28"></canvas>
+</div>
+
 <script>
+// ─── PIXEL ART ───────────────────────────────────────────────────────────────
+// Robot: 8×14 grid, 4px/pixel = 32×56px | colors: 0=transparent,1=green,2=dark,3=blue
+const ROBOT = [
+  // Frame 1 – arms at side
+  [[0,0,1,1,1,1,0,0],
+   [0,1,1,1,1,1,1,0],
+   [1,1,2,1,1,2,1,1],
+   [1,1,1,2,2,1,1,1],
+   [0,1,1,1,1,1,1,0],
+   [0,0,1,3,3,1,0,0],
+   [0,1,1,1,1,1,1,0],
+   [0,1,1,1,1,1,1,0],
+   [1,0,0,1,1,0,0,1],
+   [1,0,0,0,0,0,0,1],
+   [0,0,1,1,1,1,0,0],
+   [0,0,1,0,0,1,0,0],
+   [0,0,1,0,0,1,0,0],
+   [0,0,1,1,1,1,0,0]],
+  // Frame 2 – left arm raised (waving)
+  [[0,0,1,1,1,1,0,0],
+   [0,1,1,1,1,1,1,0],
+   [1,1,2,1,1,2,1,1],
+   [1,1,1,2,2,1,1,1],
+   [0,1,1,1,1,1,1,0],
+   [0,0,1,3,3,1,0,0],
+   [1,0,1,1,1,1,1,0],
+   [1,1,0,1,1,1,1,0],
+   [0,1,0,1,1,0,0,1],
+   [0,0,0,0,0,0,0,1],
+   [0,0,1,1,1,1,0,0],
+   [0,0,1,0,0,1,0,0],
+   [0,0,1,0,0,1,0,0],
+   [0,0,1,1,1,1,0,0]],
+];
+const ROBOT_C = [null,'#00ff41','#005518','#00cfff'];
+
+// Cat runner: 8×8 grid, 3px/pixel = 24×24px | colors: 0=transparent,1=amber,2=dark
+const CAT = [
+  [[0,1,1,0,0,1,1,0],  // ears
+   [1,1,1,1,1,1,1,1],  // head
+   [1,2,1,1,1,1,2,1],  // eyes
+   [1,1,1,1,1,1,1,1],
+   [0,1,1,1,1,1,1,0],  // body
+   [0,1,1,1,1,1,1,0],
+   [0,1,0,1,0,0,0,0],  // legs pos 1
+   [0,1,0,0,0,0,0,0]],
+  [[0,1,1,0,0,1,1,0],
+   [1,1,1,1,1,1,1,1],
+   [1,2,1,1,1,1,2,1],
+   [1,1,1,1,1,1,1,1],
+   [0,1,1,1,1,1,1,0],
+   [0,1,1,1,1,1,1,0],
+   [0,0,0,1,0,1,0,0],  // legs pos 2
+   [0,0,0,0,0,1,0,0]],
+  [[0,1,1,0,0,1,1,0],
+   [1,1,1,1,1,1,1,1],
+   [1,2,1,1,1,1,2,1],
+   [1,1,1,1,1,1,1,1],
+   [0,1,1,1,1,1,1,0],
+   [0,1,1,1,1,1,1,0],
+   [1,0,0,1,0,0,0,1],  // legs spread (jump)
+   [0,0,0,0,0,0,0,0]],
+];
+const CAT_C = [null,'#ffb000','#7a5500'];
+
+function drawSprite(ctx, frame, colors, px) {
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  for (let r = 0; r < frame.length; r++) {
+    for (let c = 0; c < frame[r].length; c++) {
+      const ci = frame[r][c];
+      if (!ci || !colors[ci]) continue;
+      ctx.fillStyle = colors[ci];
+      ctx.fillRect(c * px, r * px, px, px);
+    }
+  }
+}
+
+// ─── ROBOT (header, both sides) ──────────────────────────────────────────────
+const robotL = document.getElementById('robot-canvas').getContext('2d');
+const robotR = document.getElementById('robot-canvas-r').getContext('2d');
+let robotF = 0;
+function animRobot() {
+  const f = ROBOT[robotF % 2];
+  drawSprite(robotL, f, ROBOT_C, 4);
+  // Mirror right robot
+  robotR.clearRect(0, 0, 32, 56);
+  robotR.save();
+  robotR.translate(32, 0);
+  robotR.scale(-1, 1);
+  drawSprite(robotR, ROBOT[1 - robotF % 2], ROBOT_C, 4);
+  robotR.restore();
+  robotF++;
+}
+animRobot();
+setInterval(animRobot, 650);
+
+// ─── RUNNER (cat walking at bottom) ─────────────────────────────────────────
+const runnerCtx = document.getElementById('runner-canvas').getContext('2d');
+const runnerEl = document.getElementById('runner-canvas');
+let runX = -30, catF = 0, lastRun = 0;
+function animRunner(ts) {
+  if (ts - lastRun > 130) {
+    lastRun = ts;
+    drawSprite(runnerCtx, CAT[catF % 3], CAT_C, 3);
+    catF++;
+    runX += 2.5;
+    if (runX > window.innerWidth + 30) runX = -30;
+    runnerEl.style.left = runX + 'px';
+  }
+  requestAnimationFrame(animRunner);
+}
+requestAnimationFrame(animRunner);
+
+// ─── MATRIX RAIN ─────────────────────────────────────────────────────────────
+const mc = document.getElementById('matrix-canvas');
+const mx = mc.getContext('2d');
+let drops = [];
+function initMatrix() {
+  mc.width = window.innerWidth;
+  mc.height = window.innerHeight;
+  const cols = Math.floor(window.innerWidth / 14);
+  drops = Array.from({length: cols}, () => Math.random() * -100);
+}
+function drawMatrix() {
+  mx.fillStyle = 'rgba(10,10,10,0.06)';
+  mx.fillRect(0, 0, mc.width, mc.height);
+  mx.fillStyle = '#00ff41';
+  mx.font = '10px monospace';
+  drops.forEach((y, i) => {
+    mx.fillText(String.fromCharCode(0x30A0 + Math.random() * 96), i * 14, y * 14);
+    if (y * 14 > mc.height && Math.random() > 0.975) drops[i] = 0;
+    drops[i] += 0.4;
+  });
+}
+initMatrix();
+setInterval(drawMatrix, 60);
+window.addEventListener('resize', initMatrix);
+
+// ─── MONITOR LOGIC ───────────────────────────────────────────────────────────
 const logs = [{t:'ok',m:'[BOOT] PNP BOT MONITOR INITIALIZED'},{t:'ok',m:'[SYS] CONNECTING TO SERVER...'}];
 
 function ts(){return new Date().toLocaleTimeString('th-TH',{hour12:false})}
@@ -144,12 +300,10 @@ function renderLog(){
   b.innerHTML=logs.map(l=>`<div class="log-line ${l.t}">${l.m}</div>`).join('')+'<div class="log-line"><span class="log-cursor"></span></div>';
   b.scrollTop=b.scrollHeight;
 }
-
 function setStatus(id,state,text){
   const el=document.getElementById(id);
   el.className=state;el.textContent=text||({ok:'ONLINE',err:'ERROR',warn:'CHECKING'}[state]);
 }
-
 function renderUptime(){
   const bar=document.getElementById('uptime-bar');
   bar.innerHTML=Array.from({length:24},(_,i)=>{
@@ -157,7 +311,6 @@ function renderUptime(){
     return `<div class="tick ${ok?'on':'off'}" title="hour ${23-i}: ${ok?'OK':'DOWN'}"></div>`;
   }).join('');
 }
-
 async function checkHealth(){
   try{
     const r=await fetch('/health',{cache:'no-store'});
@@ -167,16 +320,13 @@ async function checkHealth(){
     const dbOk=dbData.ok;
     const dbDisabled=dbData.note==='disabled';
     const allOk=driveOk&&(dbDisabled||dbOk);
-
     setStatus('s-line','ok');
     setStatus('s-drive',driveOk?'ok':'err');
     setStatus('s-db',dbDisabled?'warn':'DISABLED',dbDisabled?undefined:(dbOk?'ok':'err'));
     if(dbDisabled){const el=document.getElementById('s-db');el.className='warn';el.textContent='DISABLED';}
-
     document.getElementById('health-ping').className='ping'+(allOk?'':' red');
     const hl=document.getElementById('health-lbl');
     hl.className=allOk?'ok':'err';hl.textContent=allOk?'ALL SYSTEMS GO':'DEGRADED';
-
     document.getElementById('ts-check').textContent=`LAST CHECK: ${ts()}`;
     addLog('ok',`[HEALTH] ${allOk?'OK':'DEGRADED'} DRIVE=${driveOk?'OK':'ERR'} DB=${dbDisabled?'DISABLED':dbOk?'OK':'ERR'}`);
   }catch(e){
@@ -186,7 +336,6 @@ async function checkHealth(){
     addLog('err',`[ERR] ${e.message}`);
   }
 }
-
 async function fetchStats(){
   addLog('warn','[STATS] FETCHING FILE COUNTS...');
   try{
@@ -194,12 +343,10 @@ async function fetchStats(){
     const d=await r.json();
     const {images=0,videos=0,documents=0}=d.files||{};
     const total=Math.max(images+videos+documents,1);
-
     animateCount('cnt-img',images,'bar-img',Math.round(images/total*100));
     animateCount('cnt-vid',videos,'bar-vid',Math.round(videos/total*100));
     animateCount('cnt-doc',documents,'bar-doc',Math.round(documents/total*100));
     addLog('ok',`[DRIVE] IMG=${images} VID=${videos} DOC=${documents}`);
-
     const appts=d.appointments||[];
     const list=document.getElementById('appt-list');
     if(!appts.length){
@@ -217,7 +364,6 @@ async function fetchStats(){
     addLog('err',`[STATS ERR] ${e.message}`);
   }
 }
-
 function animateCount(cntId,target,barId,pct){
   let i=0;
   const iv=setInterval(()=>{
@@ -226,7 +372,6 @@ function animateCount(cntId,target,barId,pct){
     document.getElementById(barId).style.width=(pct*i/100)+'%';
   },16);
 }
-
 function refresh(){
   document.getElementById('ts-global').textContent=`REFRESHED: ${ts()}`;
   renderLog();
@@ -234,7 +379,6 @@ function refresh(){
   checkHealth();
   fetchStats();
 }
-
 renderLog();
 renderUptime();
 refresh();
