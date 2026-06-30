@@ -288,11 +288,6 @@ async function handleTextCommand(event) {
     const sourceKey = getSourceKey(event.source);
     activeFolders.set(sourceKey, { folderName: command.folderName });
     await persistActiveFolder(sourceKey, command.folderName);
-
-    await replyLineMessage(
-      event.replyToken,
-      `✅ ตั้งหมวด: ${command.folderName}\n🖼 รูปภาพ/${command.folderName}\n🎬 วิดีโอ/${command.folderName}\n📄 เอกสาร/${command.folderName}`
-    );
   }
 }
 
