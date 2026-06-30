@@ -366,8 +366,6 @@ async function createAppointment(event, command) {
       `🕐 ${formatThaiDateTime(appointmentAt)}`,
       `🔖 รหัส: ${code}`,
       command.details ? `📝 ${command.details}` : "",
-      "",
-      `🔔 แจ้งเตือน ${String(reminderMorningHour).padStart(2, "0")}:00 และก่อนนัด 10 นาที`,
     ]
       .filter(Boolean)
       .join("\n")
