@@ -437,12 +437,12 @@ function getAppointmentHelpMessage() {
   return [
     "📅 คำสั่งนัดหมาย",
     "─────────────────",
-    "/นัด หัวข้อ | YYYY-MM-DD HH:mm | รายละเอียด",
+    "/นัด หัวข้อ DD/MM/YYYY HH.mm สถานที่",
     "/นัดหมาย — ดูตารางนัดหมาย",
     "/ยกเลิกนัด รหัส",
     "",
     "💡 ตัวอย่าง",
-    "/นัด ประชุมโครงการ | 2026-07-05 14:00 | ห้องประชุม A",
+    "/นัด อบรมต่อต้านยาเสพติด 30/06/2569 13.30 ห้องประชุมเอราวรรณ งานปกครอง",
   ].join("\n");
 }
 
@@ -669,16 +669,18 @@ function parseAppointmentCommand(text) {
     return null;
   }
 
-  const parts = createMatch[1].split("|").map((part) => part.trim());
-  if (parts.length < 2) {
+  const body = createMatch[1].trim();
+  // Format: /นัด [title] DD/MM/YYYY HH.mm [details]
+  const dateTimeMatch = body.match(/^(.+?)\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}[.:]\d{2})\s*(.*)$/);
+  if (!dateTimeMatch) {
     return { type: "appointment.help" };
   }
 
   return {
     type: "appointment.create",
-    title: sanitizePlainText(parts[0], 180),
-    appointmentText: parts[1],
-    details: sanitizePlainText(parts.slice(2).join(" | "), 800),
+    title: sanitizePlainText(dateTimeMatch[1], 180),
+    appointmentText: `${dateTimeMatch[2]} ${dateTimeMatch[3]}`,
+    details: sanitizePlainText(dateTimeMatch[4], 800),
   };
 }
 
@@ -843,7 +845,19 @@ async function createAppointmentCode() {
 }
 
 function parseBangkokDateTime(value) {
-  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
+  const str = String(value || "").trim();
+
+  // Format: DD/MM/YYYY HH.mm or DD/MM/YYYY HH:mm (Buddhist Era year auto-converted)
+  const thaiMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2})[.:](\d{2})$/);
+  if (thaiMatch) {
+    let [, dayText, monthText, yearText, hourText, minuteText] = thaiMatch;
+    let year = Number(yearText);
+    if (year > 2400) year -= 543; // แปลง พ.ศ. → ค.ศ.
+    return parseBangkokDateTime(`${year}-${monthText.padStart(2,"0")}-${dayText.padStart(2,"0")} ${hourText.padStart(2,"0")}:${minuteText}`);
+  }
+
+  // Original format: YYYY-MM-DD HH:mm
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
   if (!match) {
     return null;
   }
