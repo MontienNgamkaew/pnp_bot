@@ -785,6 +785,11 @@ async function flushUploadSummary(sourceKey) {
 
   const message = buildUploadSummaryMessage(batch.uploads);
   await pushLineMessage(batch.to, message);
+
+  if (activeFolders.has(sourceKey)) {
+    activeFolders.delete(sourceKey);
+    await persistActiveFolder(sourceKey, null);
+  }
 }
 
 function buildUploadSummaryMessage(uploads) {
