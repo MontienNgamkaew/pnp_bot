@@ -288,6 +288,7 @@ async function handleTextCommand(event) {
     const sourceKey = getSourceKey(event.source);
     activeFolders.set(sourceKey, { folderName: command.folderName });
     await persistActiveFolder(sourceKey, command.folderName);
+    await replyLineMessage(event.replyToken, "✅ พร้อมเก็บไฟล์ อัพโหลดได้เลยค่ะ");
   }
 }
 
