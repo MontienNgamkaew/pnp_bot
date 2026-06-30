@@ -766,7 +766,6 @@ function scheduleUploadSummary(source, upload) {
 
   if (!batch.timer) {
     batch.timer = setTimeout(() => {
-      console.log(`[SUMMARY] Flushing batch for ${sourceKey}, uploads=${batch.uploads.length}`);
       flushUploadSummary(sourceKey).catch((error) => {
         console.error("Failed to send upload summary", error);
       });
@@ -785,9 +784,7 @@ async function flushUploadSummary(sourceKey) {
   uploadSummaryBatches.delete(sourceKey);
 
   const message = buildUploadSummaryMessage(batch.uploads);
-  console.log(`[SUMMARY] Sending push to ${batch.to}`);
   await pushLineMessage(batch.to, message);
-  console.log(`[SUMMARY] Push sent OK`);
 
   if (activeFolders.has(sourceKey)) {
     activeFolders.delete(sourceKey);
