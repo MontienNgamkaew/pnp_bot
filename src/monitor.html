@@ -67,6 +67,30 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backg
 #matrix-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;opacity:0.04}
 #runner-strip{position:fixed;bottom:0;left:0;width:100%;height:40px;pointer-events:none;z-index:998;overflow:hidden;border-top:1px solid #0d0d0d}
 #runner-canvas{position:absolute;bottom:6px;image-rendering:pixelated;image-rendering:crisp-edges}
+.diag-item{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #111}
+.diag-item:last-child{border-bottom:none}
+.diag-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.diag-dot.ok{background:#00ff41;box-shadow:0 0 4px #00ff41}
+.diag-dot.warn{background:#ffb000;box-shadow:0 0 4px #ffb000}
+.diag-dot.err{background:#ff3131;box-shadow:0 0 4px #ff3131}
+.diag-label{font-size:7px;color:#aaa;line-height:1.8}
+.diag-fix{font-size:6px;color:#555;margin-top:3px}
+.err-item{padding:6px 0;border-bottom:1px solid #0d0d0d;font-size:6px}
+.err-item:last-child{border-bottom:none}
+.err-ts{color:#333}
+.err-ctx{color:#ffb000;margin:0 6px}
+.err-msg{color:#ff5555}
+.btn-danger{font-family:'Press Start 2P',monospace;font-size:8px;color:#ff3131;background:transparent;border:2px solid #ff3131;padding:10px 16px;cursor:pointer;letter-spacing:1px}
+.btn-danger:hover{background:#ff3131;color:#000}
+.btn-row{display:flex;gap:10px;margin-top:15px}
+.modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center}
+.modal-overlay.active{display:flex}
+.modal{background:#0d0d0d;border:2px solid #ff3131;padding:24px;max-width:400px;width:90%}
+.modal-title{font-size:10px;color:#ff3131;margin-bottom:16px}
+.modal-input{font-family:'Press Start 2P',monospace;font-size:7px;background:#050505;border:1px solid #333;color:#00ff41;padding:10px;width:100%;margin:10px 0;outline:none}
+.modal-input:focus{border-color:#00ff41}
+.modal-btns{display:flex;gap:8px;margin-top:12px}
+.modal-btns button{flex:1}
 @media(max-width:600px){.grid2,.grid3{grid-template-columns:1fr}}
 </style>
 </head>
@@ -143,8 +167,38 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backg
     <div class="log-box" id="log-box"></div>
   </div>
 
-  <button class="refresh-btn" onclick="refresh()">[ &gt; REFRESH STATUS ]</button>
+  <div class="section-hdr">&gt; DIAGNOSTICS</div>
+  <div class="panel" style="margin-bottom:15px">
+    <div class="panel-title">SYSTEM ANALYSIS</div>
+    <div id="diag-list"><div class="empty">[ ANALYZING... ]</div></div>
+  </div>
+
+  <div class="section-hdr">&gt; RECENT ERRORS</div>
+  <div class="panel" style="margin-bottom:15px">
+    <div class="panel-title">ERROR LOG (LAST 50)</div>
+    <div id="err-list"><div class="empty">[ NO ERRORS ]</div></div>
+  </div>
+
+  <div class="btn-row">
+    <button class="refresh-btn" onclick="refresh()" style="margin-top:0">[ &gt; REFRESH STATUS ]</button>
+    <button class="btn-danger" onclick="openRestart()">[ &gt; RESTART BOT ]</button>
+  </div>
   <div class="ts" id="ts-global" style="margin-top:8px">--</div>
+</div>
+
+<!-- Restart modal -->
+<div class="modal-overlay" id="restart-modal">
+  <div class="modal">
+    <div class="modal-title">⚠ RESTART BOT</div>
+    <div style="font-size:6px;color:#666;margin-bottom:8px">Bot จะหยุดทำงาน ~5 วินาที แล้ว restart อัตโนมัติ</div>
+    <div style="font-size:7px;color:#aaa;margin-top:10px">กรอก RESTART_SECRET:</div>
+    <input class="modal-input" type="password" id="restart-key" placeholder="secret key">
+    <div id="restart-msg" style="font-size:6px;color:#ff3131;min-height:14px;margin-top:4px"></div>
+    <div class="modal-btns">
+      <button class="btn-danger" onclick="doRestart()">[ CONFIRM ]</button>
+      <button class="refresh-btn" style="margin-top:0" onclick="closeRestart()">[ CANCEL ]</button>
+    </div>
+  </div>
 </div>
 
 <div id="runner-strip">
@@ -329,11 +383,15 @@ async function checkHealth(){
     hl.className=allOk?'ok':'err';hl.textContent=allOk?'ALL SYSTEMS GO':'DEGRADED';
     document.getElementById('ts-check').textContent=`LAST CHECK: ${ts()}`;
     addLog('ok',`[HEALTH] ${allOk?'OK':'DEGRADED'} DRIVE=${driveOk?'OK':'ERR'} DB=${dbDisabled?'DISABLED':dbOk?'OK':'ERR'}`);
+    diagState.lineOk=true; diagState.driveOk=driveOk; diagState.dbOk=dbOk; diagState.dbDisabled=dbDisabled;
+    renderDiag();
   }catch(e){
     ['s-line','s-drive','s-db'].forEach(id=>setStatus(id,'err','UNREACHABLE'));
     document.getElementById('health-ping').className='ping red';
     const hl=document.getElementById('health-lbl');hl.className='err';hl.textContent='OFFLINE';
     addLog('err',`[ERR] ${e.message}`);
+    diagState.lineOk=false; diagState.driveOk=false;
+    renderDiag();
   }
 }
 async function fetchStats(){
@@ -372,12 +430,103 @@ function animateCount(cntId,target,barId,pct){
     document.getElementById(barId).style.width=(pct*i/100)+'%';
   },16);
 }
+// ─── DIAGNOSTICS ────────────────────────────────────────────────────────────
+const DIAG_RULES = [
+  { key:'line',   label:'LINE API',        ok: d=>d.lineOk,    fix:'ตรวจสอบ LINE_CHANNEL_SECRET และ LINE_CHANNEL_ACCESS_TOKEN ใน hPanel' },
+  { key:'drive',  label:'Google Drive',    ok: d=>d.driveOk,   fix:'ตรวจสอบ GOOGLE_SERVICE_ACCOUNT_BASE64 และสิทธิ์ Shared Drive' },
+  { key:'db',     label:'MySQL Database',  ok: d=>d.dbOk||d.dbDisabled, fix:'ตรวจสอบ DB_HOST, DB_USER, DB_PASSWORD, DB_NAME ใน hPanel', warn: d=>d.dbDisabled },
+  { key:'upload', label:'Upload (Drive)',  ok: d=>!d.uploadErr, fix:'appProperties เกิน 124 bytes หรือ Drive quota หมด — ตรวจสอบ error log' },
+  { key:'notify', label:'Notify (LINE)',   ok: d=>!d.notifyErr, fix:'LINE Push API quota หมด 500/เดือน — ระบบใช้ Reply API แทนอัตโนมัติ', warn: d=>d.notifyErr },
+];
+
+let diagState = { lineOk:false, driveOk:false, dbOk:false, dbDisabled:false, uploadErr:false, notifyErr:false };
+
+function renderDiag() {
+  const list = document.getElementById('diag-list');
+  list.innerHTML = DIAG_RULES.map(r => {
+    const isOk = r.ok(diagState);
+    const isWarn = r.warn && r.warn(diagState);
+    const dot = isOk ? (isWarn ? 'warn' : 'ok') : 'err';
+    const fix = (!isOk || isWarn) ? `<div class="diag-fix">&gt; ${r.fix}</div>` : '';
+    return `<div class="diag-item">
+      <div class="diag-dot ${dot}"></div>
+      <div class="diag-label">${r.label}${fix}</div>
+    </div>`;
+  }).join('');
+}
+
+async function fetchErrors() {
+  try {
+    const r = await fetch('/api/errors', {cache:'no-store'});
+    const d = await r.json();
+    const errs = d.errors || [];
+    const list = document.getElementById('err-list');
+    if (!errs.length) {
+      list.innerHTML = '<div class="empty">[ NO ERRORS ]</div>';
+      diagState.uploadErr = false;
+      diagState.notifyErr = false;
+    } else {
+      list.innerHTML = errs.slice(0,20).map(e => {
+        const t = new Date(e.ts).toLocaleTimeString('th-TH',{hour12:false});
+        return `<div class="err-item"><span class="err-ts">${t}</span><span class="err-ctx">[${e.context}]</span><span class="err-msg">${e.message.slice(0,120)}</span></div>`;
+      }).join('');
+      diagState.uploadErr = errs.some(e => e.context === 'upload');
+      diagState.notifyErr = errs.some(e => e.context === 'notify');
+    }
+    renderDiag();
+  } catch(_) {}
+}
+
+// ─── RESTART ─────────────────────────────────────────────────────────────────
+function openRestart() {
+  document.getElementById('restart-key').value = '';
+  document.getElementById('restart-msg').textContent = '';
+  document.getElementById('restart-modal').classList.add('active');
+  setTimeout(() => document.getElementById('restart-key').focus(), 50);
+}
+function closeRestart() {
+  document.getElementById('restart-modal').classList.remove('active');
+}
+async function doRestart() {
+  const key = document.getElementById('restart-key').value;
+  const msg = document.getElementById('restart-msg');
+  if (!key) { msg.textContent = 'กรุณากรอก secret key'; return; }
+  msg.style.color = '#ffb000';
+  msg.textContent = 'กำลัง restart...';
+  try {
+    const r = await fetch('/api/restart', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({key}),
+    });
+    if (r.ok) {
+      msg.style.color = '#00ff41';
+      msg.textContent = 'Restart สำเร็จ รอ 5-10 วินาที...';
+      addLog('warn','[RESTART] Bot restarting...');
+      setTimeout(() => { closeRestart(); refresh(); }, 8000);
+    } else {
+      msg.style.color = '#ff3131';
+      msg.textContent = 'Secret key ไม่ถูกต้อง';
+    }
+  } catch(e) {
+    msg.style.color = '#ff3131';
+    msg.textContent = 'Error: ' + e.message;
+  }
+}
+document.getElementById('restart-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeRestart();
+});
+document.getElementById('restart-key').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doRestart();
+});
+
 function refresh(){
   document.getElementById('ts-global').textContent=`REFRESHED: ${ts()}`;
   renderLog();
   renderUptime();
   checkHealth();
   fetchStats();
+  fetchErrors();
 }
 renderLog();
 renderUptime();

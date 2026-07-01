@@ -19,8 +19,21 @@ const {
   SUMMARY_DELAY_SECONDS = 45,
   REMINDER_MORNING_HOUR = 8,
   REMINDER_CHECK_INTERVAL_SECONDS = 60,
+  RESTART_SECRET,
   PORT = 3000,
 } = process.env;
+
+// In-memory error buffer (last 50 errors)
+const errorBuffer = [];
+function captureError(context, error) {
+  const entry = {
+    ts: new Date().toISOString(),
+    context,
+    message: error && error.message ? error.message : String(error),
+  };
+  errorBuffer.push(entry);
+  if (errorBuffer.length > 50) errorBuffer.shift();
+}
 
 const REQUIRED_ENV = [
   "LINE_CHANNEL_SECRET",
@@ -58,6 +71,18 @@ app.get("/api/stats", (_req, res) => {
   }).catch((err) => {
     res.status(500).json({ error: err.message });
   });
+});
+
+app.get("/api/errors", (_req, res) => {
+  res.json({ errors: errorBuffer.slice().reverse() });
+});
+
+app.post("/api/restart", express.json(), (req, res) => {
+  if (!RESTART_SECRET || (req.body && req.body.key) !== RESTART_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  res.json({ ok: true });
+  setTimeout(() => process.exit(0), 500);
 });
 
 app.get("/health", (_req, res) => {
@@ -181,9 +206,11 @@ app.post("/webhook", express.raw({ type: "*/*" }), (req, res) => {
         messageId: event.message && event.message.id,
         error,
       });
+      captureError("upload", error);
 
       notifyUploadFailure(event).catch((notifyError) => {
         console.error("Failed to notify upload failure", notifyError);
+        captureError("notify", notifyError);
       });
     });
   }
@@ -761,6 +788,7 @@ function scheduleUploadSummary(source, replyToken, upload) {
   batch.timer = setTimeout(() => {
     flushUploadSummary(sourceKey).catch((error) => {
       console.error("Failed to send upload summary", error);
+      captureError("summary", error);
     });
   }, summaryDelayMs);
 
