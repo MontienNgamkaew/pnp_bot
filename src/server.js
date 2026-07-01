@@ -406,6 +406,11 @@ async function handleAppointmentCommand(event, command) {
     return;
   }
 
+  if (command.type === "appointment.create_natural") {
+    await createAppointmentNatural(event, command.text);
+    return;
+  }
+
   if (command.type === "appointment.list") {
     await listAppointments(event);
     return;
@@ -461,6 +466,134 @@ async function createAppointment(event, command) {
       .filter(Boolean)
       .join("\n")
   );
+}
+
+async function createAppointmentNatural(event, text) {
+  if (!process.env.GEMINI_API_KEY) {
+    await replyLineMessage(
+      event.replyToken,
+      "❌ ยังไม่ได้เปิดใช้งานระบบวิเคราะห์นัดหมายด้วย AI (กรุณาตั้งค่า GEMINI_API_KEY ในสภาพแวดล้อมของเซิร์ฟเวอร์)"
+    );
+    return;
+  }
+
+  const now = new Date();
+  const formattedNow = formatThaiDateTime(now);
+  const nowISO = now.toISOString();
+
+  const prompt = `
+You are an assistant parsing a LINE chat appointment request into structured JSON data.
+Current Time (Bangkok Time): ${formattedNow} (ISO: ${nowISO})
+User Input Text: "${text}"
+
+Parse the user input text to extract:
+1. "title": The main subject or topic of the meeting/appointment.
+2. "dateTime": The date and time of the appointment. It MUST be returned in the format "YYYY-MM-DD HH:mm" based on Bangkok Time. Make sure to calculate relative terms like "วันพรุ่งนี้" (tomorrow, current + 1 day), "วันนี้" (today, current day), "เวลา 14.00 น." -> "14:00" correctly.
+3. "details": Any location (e.g. ห้องประชุมมโนไพร), attendees, or extra description.
+
+Return ONLY the JSON matching the schema.
+`;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                title: { type: "STRING", description: "The main title/topic of the appointment" },
+                dateTime: { type: "STRING", description: "The date and time of the appointment in YYYY-MM-DD HH:mm format." },
+                details: { type: "STRING", description: "Any other details such as location or note. If none, leave blank." },
+              },
+              required: ["title", "dateTime"],
+            },
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini API returned status ${response.status}: ${errText}`);
+    }
+
+    const resJson = await response.json();
+    const responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!responseText) {
+      throw new Error("Invalid response structure from Gemini API");
+    }
+
+    const result = JSON.parse(responseText.trim());
+    if (!result.title || !result.dateTime) {
+      throw new Error("AI could not extract title or date/time from the text.");
+    }
+
+    // Now, parse the Bangkok date time and call create
+    const appointmentAt = parseBangkokDateTime(result.dateTime);
+    if (!appointmentAt) {
+      await replyLineMessage(
+        event.replyToken,
+        `❌ AI วิเคราะห์วันเวลาเป็น "${result.dateTime}" แต่รูปแบบไม่ถูกต้องสำหรับระบบ`
+      );
+      return;
+    }
+
+    if (appointmentAt.getTime() <= Date.now()) {
+      await replyLineMessage(
+        event.replyToken,
+        `❌ เวลานัดหมายต้องเป็นเวลาในอนาคต\n(AI วิเคราะห์เป็น: ${formatThaiDateTime(appointmentAt)})`
+      );
+      return;
+    }
+
+    const code = await createAppointmentCode();
+
+    await dbPool.execute(
+      `
+        INSERT INTO appointments
+          (appointment_code, source_type, source_id, title, details, appointment_at)
+        VALUES
+          (:code, :sourceType, :sourceId, :title, :details, :appointmentAt)
+      `,
+      {
+        code,
+        sourceType: event.source && event.source.type ? event.source.type : "unknown",
+        sourceId: getSourceId(event.source),
+        title: result.title,
+        details: result.details || null,
+        appointmentAt: toMysqlDateTime(appointmentAt),
+      }
+    );
+
+    await replyLineMessage(
+      event.replyToken,
+      [
+        "🤖 บันทึกนัดหมายสำเร็จด้วย AI",
+        "─────────────────",
+        `📌 ${result.title}`,
+        `🕐 ${formatThaiDateTime(appointmentAt)}`,
+        `🔖 รหัส: ${code}`,
+        result.details ? `📝 ${result.details}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  } catch (error) {
+    console.error("AI appointment parsing failed:", error);
+    captureError("ai-appointment", error);
+    await replyLineMessage(
+      event.replyToken,
+      `❌ ระบบวิเคราะห์นัดหมายด้วย AI ผิดพลาด:\n${error.message || error}`
+    );
+  }
 }
 
 async function listAppointments(event) {
@@ -762,7 +895,7 @@ function parseAppointmentCommand(text) {
   // Format: /นัด [title] DD/MM/YYYY HH.mm [details]
   const dateTimeMatch = body.match(/^(.+?)\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}[.:]\d{2})\s*(.*)$/);
   if (!dateTimeMatch) {
-    return { type: "appointment.help" };
+    return { type: "appointment.create_natural", text: body };
   }
 
   return {
