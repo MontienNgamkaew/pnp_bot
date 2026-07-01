@@ -355,6 +355,11 @@ async function handleTextCommand(event) {
     return;
   }
 
+  if (command.type === "summarize") {
+    await handleSummarizeCommand(event, command);
+    return;
+  }
+
   if (command.type === "help") {
     await replyLineMessage(event.replyToken, getHelpMessage());
     return;
@@ -678,6 +683,164 @@ function getAppointmentHelpMessage() {
   ].join("\n");
 }
 
+async function handleSummarizeCommand(event, command) {
+  if (!process.env.GEMINI_API_KEY) {
+    await replyLineMessage(
+      event.replyToken,
+      "❌ ยังไม่ได้เปิดใช้งานระบบสรุปเอกสารด้วย AI (กรุณาตั้งค่า GEMINI_API_KEY ในสภาพแวดล้อมของเซิร์ฟเวอร์)"
+    );
+    return;
+  }
+
+  const quotedMessageId = event.message.quotedMessageId;
+  if (!quotedMessageId) {
+    await replyLineMessage(
+      event.replyToken,
+      [
+        "💡 วิธีใช้งานฟีเจอร์สรุปเอกสารด้วย AI:",
+        "1. กดปุ่ม 'ตอบกลับ' (Reply) ที่รูปภาพเอกสาร หรือไฟล์ PDF ในห้องแชท",
+        "2. พิมพ์คำว่า `/สรุป` (หรือพิมพ์คำแนะนำเพิ่มต่อท้ายได้ เช่น `/สรุป สรุปเฉพาะสรุปค่าใช้จ่าย`) แล้วกดส่ง",
+        "บอตจะทำการดึงข้อมูลมาให้ AI วิเคราะห์และสรุปให้ทันทีค่ะ!"
+      ].join("\n")
+    );
+    return;
+  }
+
+  try {
+    let content;
+    try {
+      content = await fetchLineContent(quotedMessageId);
+    } catch (err) {
+      await replyLineMessage(
+        event.replyToken,
+        "❌ ไม่สามารถดึงไฟล์จากข้อความที่ตอบกลับได้ (อาจไม่ใช่รูปภาพหรือไฟล์เอกสาร หรือไฟล์หมดอายุแล้ว)"
+      );
+      return;
+    }
+
+    const mimeType = content.contentType;
+    const isImage = mimeType.startsWith("image/");
+    const isPdf = mimeType === "application/pdf";
+    const isText = mimeType.startsWith("text/");
+
+    if (!isImage && !isPdf && !isText) {
+      await replyLineMessage(
+        event.replyToken,
+        `❌ ไม่รองรับไฟล์ประเภทนี้ในการสรุปด้วย AI\n(รองรับเฉพาะ รูปภาพ และ PDF/Text เท่านั้น)`
+      );
+      return;
+    }
+
+    const chunks = [];
+    for await (const chunk of content.stream) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
+    let summary = "";
+
+    if (isText) {
+      const textContent = buffer.toString("utf-8");
+      summary = await generateTextSummary(textContent, command.customInstruction);
+    } else {
+      summary = await generateMultimodalSummary(buffer, mimeType, command.customInstruction);
+    }
+
+    await replyLineMessage(
+      event.replyToken,
+      [
+        "🤖 สรุปเนื้อหาเอกสารด้วย AI",
+        "─────────────────",
+        summary
+      ].join("\n")
+    );
+
+  } catch (error) {
+    console.error("Summarization error:", error);
+    captureError("summarize", error);
+    await replyLineMessage(
+      event.replyToken,
+      `❌ เกิดข้อผิดพลาดในการสรุปเอกสาร: ${error.message}`
+    );
+  }
+}
+
+async function generateTextSummary(text, customInstruction) {
+  const instruction = customInstruction 
+    ? `เพิ่มเติม: ${customInstruction}`
+    : "สรุปประเด็นหลักและจุดประสงค์ของเอกสารนี้เป็นหัวข้อสั้น ๆ กระชับ เข้าใจง่าย ความยาวประมาณ 5-10 บรรทัด หากมีมติที่ประชุม, กำหนดวันส่งงาน, หรือ Action Items ที่สำคัญ ให้เน้นย้ำไว้ท้ายสรุป";
+
+  const prompt = `
+คุณคือผู้ช่วยสรุปรายงานการประชุมและเอกสารขององค์กร
+ข้อความต่อไปนี้เป็นข้อความที่สกัดมาจากเอกสารที่ผู้ใช้ส่งเข้ามาในกลุ่ม LINE
+
+ภารกิจของคุณ:
+1. สรุปเนื้อหาต่อไปนี้เป็น "ภาษาไทย"
+2. ${instruction}
+
+ข้อความจากเอกสาร:
+"""
+${text.substring(0, 50000)}
+"""
+`;
+
+  return callGeminiGenerateContent([{ text: prompt }]);
+}
+
+async function generateMultimodalSummary(buffer, mimeType, customInstruction) {
+  const instruction = customInstruction 
+    ? `เพิ่มเติม: ${customInstruction}`
+    : "สรุปประเด็นหลักและจุดประสงค์ของเอกสารนี้เป็นหัวข้อสั้น ๆ กระชับ เข้าใจง่าย ความยาวประมาณ 5-10 บรรทัด หากมีมติที่ประชุม, กำหนดวันส่งงาน, หรือ Action Items ที่สำคัญ ให้เน้นย้ำไว้ท้ายสรุป";
+
+  const prompt = `
+คุณคือผู้ช่วยสรุปรายงานการประชุมและเอกสารขององค์กร
+ข้อความหรือภาพต่อไปนี้เป็นเอกสารหรือรูปภาพที่ผู้ใช้ส่งเข้ามาในกลุ่ม LINE
+
+ภารกิจของคุณ:
+1. อ่านข้อความที่ปรากฏในรูปภาพหรือเอกสาร PDF สแกนที่แนบมานี้
+2. สรุปเนื้อหาเป็น "ภาษาไทย"
+3. ${instruction}
+`;
+
+  return callGeminiGenerateContent([
+    { text: prompt },
+    {
+      inlineData: {
+        mimeType: mimeType,
+        data: buffer.toString("base64")
+      }
+    }
+  ]);
+}
+
+async function callGeminiGenerateContent(parts) {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [{ parts }],
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini API returned status ${response.status}: ${errText}`);
+  }
+
+  const resJson = await response.json();
+  const responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!responseText) {
+    throw new Error("Invalid response structure from Gemini API");
+  }
+
+  return responseText.trim();
+}
+
 function createGoogleAuth() {
   const credentials = getGoogleCredentials();
   return new google.auth.GoogleAuth({
@@ -846,6 +1009,14 @@ function parseCommand(text) {
   const appointmentCommand = parseAppointmentCommand(trimmed);
   if (appointmentCommand) {
     return appointmentCommand;
+  }
+
+  const summarizeMatch = trimmed.match(/^\/(?:สรุป|summarize|summary)(?:\s+(.+))?$/i);
+  if (summarizeMatch) {
+    return { 
+      type: "summarize", 
+      customInstruction: summarizeMatch[1] ? summarizeMatch[1].trim() : null 
+    };
   }
 
   if (lower === "/help" || lower === "/folder help" || lower === "/หมวด help") {
