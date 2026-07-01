@@ -1560,14 +1560,7 @@ ${apptsText}
 
         const briefing = await callGeminiGenerateContent([{ text: prompt }]);
 
-        await pushLineMessage(
-          sourceId,
-          [
-            "🌅 รายงานนัดหมายยามเช้าโดย AI",
-            "─────────────────",
-            briefing,
-          ].join("\n")
-        );
+        await pushLineMessage(sourceId, briefing);
         sentSuccess = true;
       } catch (err) {
         console.error(`Failed to generate AI morning briefing for ${sourceId}:`, err);
