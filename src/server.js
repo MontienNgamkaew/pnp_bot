@@ -693,75 +693,190 @@ async function handleSummarizeCommand(event, command) {
   }
 
   const quotedMessageId = event.message.quotedMessageId;
-  if (!quotedMessageId) {
-    await replyLineMessage(
-      event.replyToken,
-      [
-        "💡 วิธีใช้งานฟีเจอร์สรุปเอกสารด้วย AI:",
-        "1. กดปุ่ม 'ตอบกลับ' (Reply) ที่รูปภาพเอกสาร หรือไฟล์ PDF ในห้องแชท",
-        "2. พิมพ์คำว่า `/สรุป` (หรือพิมพ์คำแนะนำเพิ่มต่อท้ายได้ เช่น `/สรุป สรุปเฉพาะสรุปค่าใช้จ่าย`) แล้วกดส่ง",
-        "บอตจะทำการดึงข้อมูลมาให้ AI วิเคราะห์และสรุปให้ทันทีค่ะ!"
-      ].join("\n")
-    );
-    return;
-  }
-
-  try {
-    let content;
+  
+  if (quotedMessageId) {
+    // ----------------------------------------------------
+    // CASE A: User replied to a single file/image
+    // ----------------------------------------------------
     try {
-      content = await fetchLineContent(quotedMessageId);
-    } catch (err) {
+      let content;
+      try {
+        content = await fetchLineContent(quotedMessageId);
+      } catch (err) {
+        await replyLineMessage(
+          event.replyToken,
+          "❌ ไม่สามารถดึงไฟล์จากข้อความที่ตอบกลับได้ (อาจไม่ใช่รูปภาพหรือไฟล์เอกสาร หรือไฟล์หมดอายุแล้ว)"
+        );
+        return;
+      }
+
+      const mimeType = content.contentType;
+      const isImage = mimeType.startsWith("image/");
+      const isPdf = mimeType === "application/pdf";
+      const isText = mimeType.startsWith("text/");
+
+      if (!isImage && !isPdf && !isText) {
+        await replyLineMessage(
+          event.replyToken,
+          `❌ ไม่รองรับไฟล์ประเภทนี้ในการสรุปด้วย AI\n(รองรับเฉพาะ รูปภาพ และ PDF/Text เท่านั้น)`
+        );
+        return;
+      }
+
+      const chunks = [];
+      for await (const chunk of content.stream) {
+        chunks.push(chunk);
+      }
+      const buffer = Buffer.concat(chunks);
+
+      let summary = "";
+
+      if (isText) {
+        const textContent = buffer.toString("utf-8");
+        summary = await generateTextSummary(textContent, command.customInstruction);
+      } else {
+        summary = await generateMultimodalSummary([{ buffer, mimeType }], command.customInstruction);
+      }
+
       await replyLineMessage(
         event.replyToken,
-        "❌ ไม่สามารถดึงไฟล์จากข้อความที่ตอบกลับได้ (อาจไม่ใช่รูปภาพหรือไฟล์เอกสาร หรือไฟล์หมดอายุแล้ว)"
+        [
+          "🤖 สรุปเนื้อหาเอกสารด้วย AI",
+          "─────────────────",
+          summary
+        ].join("\n")
       );
-      return;
-    }
 
-    const mimeType = content.contentType;
-    const isImage = mimeType.startsWith("image/");
-    const isPdf = mimeType === "application/pdf";
-    const isText = mimeType.startsWith("text/");
-
-    if (!isImage && !isPdf && !isText) {
+    } catch (error) {
+      console.error("Summarization error:", error);
+      captureError("summarize", error);
       await replyLineMessage(
         event.replyToken,
-        `❌ ไม่รองรับไฟล์ประเภทนี้ในการสรุปด้วย AI\n(รองรับเฉพาะ รูปภาพ และ PDF/Text เท่านั้น)`
+        `❌ เกิดข้อผิดพลาดในการสรุปเอกสาร: ${error.message}`
       );
-      return;
     }
+  } else {
+    // ----------------------------------------------------
+    // CASE B: User typed /สรุป (without replying to a message)
+    //         -> Summarize the last N files in Google Drive active folders
+    // ----------------------------------------------------
+    try {
+      const organization = getActiveOrganization(event.source);
+      const orgName = organization ? organization.folderName : null;
+      
+      const imageFolderId = await getFolderId("image", orgName);
+      const documentFolderId = await getFolderId("document", orgName);
 
-    const chunks = [];
-    for await (const chunk of content.stream) {
-      chunks.push(chunk);
+      // List the most recent files from both folders
+      const imagesList = await drive.files.list({
+        q: `'${imageFolderId}' in parents and trashed = false and (mimeType = 'image/jpeg' or mimeType = 'image/png' or mimeType = 'image/webp' or mimeType = 'application/pdf')`,
+        fields: "files(id, name, mimeType, createdTime)",
+        orderBy: "createdTime desc",
+        pageSize: 5,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+
+      const docsList = await drive.files.list({
+        q: `'${documentFolderId}' in parents and trashed = false and (mimeType = 'application/pdf' or mimeType = 'text/plain')`,
+        fields: "files(id, name, mimeType, createdTime)",
+        orderBy: "createdTime desc",
+        pageSize: 5,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+
+      // Combine and sort by createdTime desc
+      const allFiles = [
+        ...(imagesList.data.files || []),
+        ...(docsList.data.files || [])
+      ].sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
+
+      if (allFiles.length === 0) {
+        await replyLineMessage(
+          event.replyToken,
+          [
+            "💡 ไม่พบเอกสารหรือรูปภาพล่าสุดในโฟลเดอร์สำหรับสรุปความ",
+            "คุณสามารถใช้งานโดยการกดตอบกลับ (Reply) รูปภาพ หรือ PDF ในห้องแชท แล้วพิมพ์ `/สรุป` ค่ะ"
+          ].join("\n")
+        );
+        return;
+      }
+
+      // Filter files uploaded in the last 15 minutes (900 seconds)
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const recentFiles = allFiles.filter(file => new Date(file.createdTime) >= fifteenMinutesAgo).slice(0, 5);
+
+      if (recentFiles.length === 0) {
+        await replyLineMessage(
+          event.replyToken,
+          [
+            "💡 ไม่พบไฟล์เอกสารหรือรูปภาพที่ถูกส่งเข้ามาใหม่ในช่วง 15 นาทีที่ผ่านมา",
+            "หากต้องการสรุปไฟล์เก่า กรุณากดตอบกลับ (Reply) ไฟล์นั้นแล้วพิมพ์คำสั่ง `/สรุป` ค่ะ"
+          ].join("\n")
+        );
+        return;
+      }
+
+      // Download each file content from Google Drive
+      const filePayloads = [];
+      let textContents = [];
+
+      for (const file of recentFiles) {
+        try {
+          const res = await drive.files.get(
+            { fileId: file.id, alt: "media" },
+            { responseType: "arraybuffer" }
+          );
+          const buffer = Buffer.from(res.data);
+          
+          if (file.mimeType.startsWith("text/")) {
+            textContents.push({ name: file.name, text: buffer.toString("utf-8") });
+          } else {
+            filePayloads.push({ buffer, mimeType: file.mimeType });
+          }
+        } catch (downloadErr) {
+          console.error(`Failed to download file ${file.name} (${file.id}):`, downloadErr);
+        }
+      }
+
+      if (filePayloads.length === 0 && textContents.length === 0) {
+        await replyLineMessage(
+          event.replyToken,
+          "❌ เกิดข้อผิดพลาดในการดึงข้อมูลไฟล์ล่าสุดจาก Google Drive"
+        );
+        return;
+      }
+
+      let summary = "";
+      let combinedText = textContents.map(tc => `[ไฟล์: ${tc.name}]\n${tc.text}`).join("\n\n");
+      
+      if (filePayloads.length > 0) {
+        summary = await generateMultimodalSummary(filePayloads, command.customInstruction, combinedText);
+      } else {
+        summary = await generateTextSummary(combinedText, command.customInstruction);
+      }
+
+      const fileNamesList = recentFiles.map(f => `• ${f.name}`).join("\n");
+      await replyLineMessage(
+        event.replyToken,
+        [
+          "🤖 สรุปรวมเอกสารล่าสุดด้วย AI",
+          `📂 เอกสารที่ประมวลผล (${recentFiles.length} ไฟล์):`,
+          fileNamesList,
+          "─────────────────",
+          summary
+        ].join("\n")
+      );
+
+    } catch (error) {
+      console.error("Multi-file summarization error:", error);
+      captureError("summarize-multi", error);
+      await replyLineMessage(
+        event.replyToken,
+        `❌ เกิดข้อผิดพลาดในการสรุปรวมเอกสาร: ${error.message}`
+      );
     }
-    const buffer = Buffer.concat(chunks);
-
-    let summary = "";
-
-    if (isText) {
-      const textContent = buffer.toString("utf-8");
-      summary = await generateTextSummary(textContent, command.customInstruction);
-    } else {
-      summary = await generateMultimodalSummary(buffer, mimeType, command.customInstruction);
-    }
-
-    await replyLineMessage(
-      event.replyToken,
-      [
-        "🤖 สรุปเนื้อหาเอกสารด้วย AI",
-        "─────────────────",
-        summary
-      ].join("\n")
-    );
-
-  } catch (error) {
-    console.error("Summarization error:", error);
-    captureError("summarize", error);
-    await replyLineMessage(
-      event.replyToken,
-      `❌ เกิดข้อผิดพลาดในการสรุปเอกสาร: ${error.message}`
-    );
   }
 }
 
@@ -787,30 +902,36 @@ ${text.substring(0, 50000)}
   return callGeminiGenerateContent([{ text: prompt }]);
 }
 
-async function generateMultimodalSummary(buffer, mimeType, customInstruction) {
+async function generateMultimodalSummary(files, customInstruction, additionalText = "") {
   const instruction = customInstruction 
     ? `เพิ่มเติม: ${customInstruction}`
     : "สรุปประเด็นหลักและจุดประสงค์ของเอกสารนี้เป็นหัวข้อสั้น ๆ กระชับ เข้าใจง่าย ความยาวประมาณ 5-10 บรรทัด หากมีมติที่ประชุม, กำหนดวันส่งงาน, หรือ Action Items ที่สำคัญ ให้เน้นย้ำไว้ท้ายสรุป";
 
-  const prompt = `
+  let prompt = `
 คุณคือผู้ช่วยสรุปรายงานการประชุมและเอกสารขององค์กร
 ข้อความหรือภาพต่อไปนี้เป็นเอกสารหรือรูปภาพที่ผู้ใช้ส่งเข้ามาในกลุ่ม LINE
 
 ภารกิจของคุณ:
-1. อ่านข้อความที่ปรากฏในรูปภาพหรือเอกสาร PDF สแกนที่แนบมานี้
-2. สรุปเนื้อหาเป็น "ภาษาไทย"
+1. อ่านข้อความที่ปรากฏในรูปภาพหรือเอกสาร PDF สแกนทั้งหมดที่แนบมานี้
+2. สรุปเนื้อหาเป็น "ภาษาไทย" โดยวิเคราะห์และเชื่อมโยงข้อมูลจากทุกรูปภาพ/เอกสารรวมเข้าด้วยกันเป็นเรื่องเดียวอย่างเป็นระบบ
 3. ${instruction}
 `;
 
-  return callGeminiGenerateContent([
+  if (additionalText) {
+    prompt += `\n\nเนื้อหาเพิ่มเติมจากเอกสารประเภทข้อความ:\n"""\n${additionalText.substring(0, 30000)}\n"""`;
+  }
+
+  const parts = [
     { text: prompt },
-    {
+    ...files.map(f => ({
       inlineData: {
-        mimeType: mimeType,
-        data: buffer.toString("base64")
+        mimeType: f.mimeType,
+        data: f.buffer.toString("base64")
       }
-    }
-  ]);
+    }))
+  ];
+
+  return callGeminiGenerateContent(parts);
 }
 
 async function callGeminiGenerateContent(parts) {
