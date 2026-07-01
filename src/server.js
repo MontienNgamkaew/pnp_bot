@@ -51,6 +51,7 @@ const app = express();
 const drive = google.drive({ version: "v3", auth: createGoogleAuth() });
 const dbPool = createDatabasePool();
 const folderCache = new Map();
+const folderCreationPromises = new Map();
 const activeFolders = new Map();
 const uploadSummaryBatches = new Map();
 const configuredSummaryDelaySeconds = Number(SUMMARY_DELAY_SECONDS);
@@ -1255,54 +1256,67 @@ async function getOrCreateFolder(folderName, parentFolderId) {
     return folderCache.get(cacheKey);
   }
 
-  const escapedName = folderName.replace(/'/g, "\\'");
-  const list = await drive.files.list({
-    q: [
-      `'${parentFolderId}' in parents`,
-      `name = '${escapedName}'`,
-      "mimeType = 'application/vnd.google-apps.folder'",
-      "trashed = false",
-    ].join(" and "),
-    fields: "files(id,name)",
-    pageSize: 1,
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-  });
-
-  const existing = list.data.files && list.data.files[0];
-  if (existing) {
-    folderCache.set(cacheKey, existing.id);
-    return existing.id;
+  if (folderCreationPromises.has(cacheKey)) {
+    return folderCreationPromises.get(cacheKey);
   }
 
-  const created = await drive.files.create({
-    requestBody: {
-      name: folderName,
-      mimeType: "application/vnd.google-apps.folder",
-      parents: [parentFolderId],
-    },
-    fields: "id",
-    supportsAllDrives: true,
-  });
+  const promise = (async () => {
+    try {
+      const escapedName = folderName.replace(/'/g, "\\'");
+      const list = await drive.files.list({
+        q: [
+          `'${parentFolderId}' in parents`,
+          `name = '${escapedName}'`,
+          "mimeType = 'application/vnd.google-apps.folder'",
+          "trashed = false",
+        ].join(" and "),
+        fields: "files(id,name)",
+        pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
 
-  // Make newly created folder shared to anyone with the link can view (reader)
-  try {
-    await drive.permissions.create({
-      fileId: created.data.id,
-      requestBody: {
-        role: "reader",
-        type: "anyone",
-      },
-      supportsAllDrives: true,
-    });
-    console.log(`Shared newly created folder "${folderName}" (${created.data.id}) to anyone with the link`);
-  } catch (err) {
-    console.error(`Failed to share folder "${folderName}" (${created.data.id}):`, err.message);
-    captureError("drive-share", err);
-  }
+      const existing = list.data.files && list.data.files[0];
+      if (existing) {
+        folderCache.set(cacheKey, existing.id);
+        return existing.id;
+      }
 
-  folderCache.set(cacheKey, created.data.id);
-  return created.data.id;
+      const created = await drive.files.create({
+        requestBody: {
+          name: folderName,
+          mimeType: "application/vnd.google-apps.folder",
+          parents: [parentFolderId],
+        },
+        fields: "id",
+        supportsAllDrives: true,
+      });
+
+      // Make newly created folder shared to anyone with the link can view (reader)
+      try {
+        await drive.permissions.create({
+          fileId: created.data.id,
+          requestBody: {
+            role: "reader",
+            type: "anyone",
+          },
+          supportsAllDrives: true,
+        });
+        console.log(`Shared newly created folder "${folderName}" (${created.data.id}) to anyone with the link`);
+      } catch (err) {
+        console.error(`Failed to share folder "${folderName}" (${created.data.id}):`, err.message);
+        captureError("drive-share", err);
+      }
+
+      folderCache.set(cacheKey, created.data.id);
+      return created.data.id;
+    } finally {
+      folderCreationPromises.delete(cacheKey);
+    }
+  })();
+
+  folderCreationPromises.set(cacheKey, promise);
+  return promise;
 }
 
 async function findExistingUpload(messageId) {
