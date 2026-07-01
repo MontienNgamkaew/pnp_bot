@@ -293,14 +293,14 @@ async function handleLineEvent(event) {
 
   // Check if file with same checksum already exists in target folder
   const duplicateCheck = await drive.files.list({
-    q: `'${folderId}' in parents and md5Checksum = '${md5Hex}' and trashed = false`,
-    fields: "files(id,name,webViewLink)",
-    pageSize: 1,
+    q: `'${folderId}' in parents and trashed = false`,
+    fields: "files(id,name,webViewLink,md5Checksum)",
+    pageSize: 100,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
   });
 
-  const driveDuplicate = duplicateCheck.data.files && duplicateCheck.data.files[0];
+  const driveDuplicate = duplicateCheck.data.files && duplicateCheck.data.files.find((f) => f.md5Checksum === md5Hex);
   if (driveDuplicate) {
     console.log(
       `Skip duplicate file upload. File already exists in folder: ${driveDuplicate.name} (ID: ${driveDuplicate.id})`
