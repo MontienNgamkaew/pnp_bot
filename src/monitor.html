@@ -220,6 +220,21 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;backg
   </div>
 </div>
 
+<!-- Cancel Appointment modal -->
+<div class="modal-overlay" id="cancel-modal">
+  <div class="modal">
+    <div class="modal-title">⚠ CANCEL APPOINTMENT</div>
+    <div style="font-size:6px;color:#666;margin-bottom:8px">ยกเลิกนัดหมายรหัส: <span id="cancel-appt-code-display" style="color:#00cfff"></span></div>
+    <div style="font-size:7px;color:#aaa;margin-top:10px">กรอก ADMIN_SECRET / RESTART_SECRET:</div>
+    <input class="modal-input" type="password" id="cancel-key" placeholder="secret key">
+    <div id="cancel-msg" style="font-size:6px;color:#ff3131;min-height:14px;margin-top:4px"></div>
+    <div class="modal-btns">
+      <button class="btn-danger" onclick="doCancelAppt()">[ CONFIRM ]</button>
+      <button class="refresh-btn" style="margin-top:0" onclick="closeCancelAppt()">[ CANCEL ]</button>
+    </div>
+  </div>
+</div>
+
 <div id="runner-strip">
   <canvas id="runner-canvas" width="24" height="28"></canvas>
 </div>
@@ -430,10 +445,13 @@ async function fetchStats(){
       list.innerHTML='<div class="empty">[ NO UPCOMING APPOINTMENTS ]</div>';
     }else{
       list.innerHTML=appts.map(a=>`
-        <div class="appt-item">
-          <div class="appt-code">${a.code}</div>
-          <div class="appt-title">${a.title}</div>
-          <div class="appt-time">${a.time}${a.details?` — ${a.details}`:''}</div>
+        <div class="appt-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <div>
+            <div class="appt-code">${a.code}</div>
+            <div class="appt-title">${a.title}</div>
+            <div class="appt-time">${a.time}${a.details?` — ${a.details}`:''}</div>
+          </div>
+          <button class="btn-danger" onclick="confirmCancelAppt('${a.code}')" style="font-size:6px;padding:6px 10px;flex-shrink:0;border-width:1px;margin:0">[ CANCEL ]</button>
         </div>`).join('');
       addLog('ok',`[APPT] ${appts.length} UPCOMING`);
     }
@@ -537,6 +555,53 @@ document.getElementById('restart-modal').addEventListener('click', e => {
 });
 document.getElementById('restart-key').addEventListener('keydown', e => {
   if (e.key === 'Enter') doRestart();
+});
+
+// ─── CANCEL APPOINTMENT ──────────────────────────────────────────────────────
+let pendingCancelCode = '';
+function confirmCancelAppt(code) {
+  pendingCancelCode = code;
+  document.getElementById('cancel-appt-code-display').textContent = code;
+  document.getElementById('cancel-key').value = '';
+  document.getElementById('cancel-msg').textContent = '';
+  document.getElementById('cancel-modal').classList.add('active');
+  setTimeout(() => document.getElementById('cancel-key').focus(), 50);
+}
+function closeCancelAppt() {
+  document.getElementById('cancel-modal').classList.remove('active');
+}
+async function doCancelAppt() {
+  const key = document.getElementById('cancel-key').value;
+  const msg = document.getElementById('cancel-msg');
+  if (!key) { msg.textContent = 'กรุณากรอก secret key'; return; }
+  msg.style.color = '#ffb000';
+  msg.textContent = 'กำลังยกเลิกนัดหมาย...';
+  try {
+    const r = await fetch('/api/appointments/cancel', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({code: pendingCancelCode, key}),
+    });
+    const resData = await r.json();
+    if (r.ok && resData.success) {
+      msg.style.color = '#00ff41';
+      msg.textContent = 'ยกเลิกนัดหมายสำเร็จ!';
+      addLog('warn',`[APPT] Cancelled appointment ${pendingCancelCode}`);
+      setTimeout(() => { closeCancelAppt(); refresh(); }, 1500);
+    } else {
+      msg.style.color = '#ff3131';
+      msg.textContent = resData.error || 'ไม่พบนัดหมายรหัสนี้หรือคีย์ไม่ถูกต้อง';
+    }
+  } catch(e) {
+    msg.style.color = '#ff3131';
+    msg.textContent = 'Error: ' + e.message;
+  }
+}
+document.getElementById('cancel-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeCancelAppt();
+});
+document.getElementById('cancel-key').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doCancelAppt();
 });
 
 function refresh(){

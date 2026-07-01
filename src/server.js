@@ -85,6 +85,42 @@ app.post("/api/restart", express.json(), (req, res) => {
   setTimeout(() => process.exit(0), 500);
 });
 
+app.post("/api/appointments/cancel", express.json(), (req, res) => {
+  const { code, key } = req.body;
+  if (!RESTART_SECRET || key !== RESTART_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  if (!code) {
+    return res.status(400).json({ error: "Missing appointment code" });
+  }
+
+  cancelAppointmentFromWeb(code)
+    .then((success) => {
+      res.json({ ok: true, success });
+    })
+    .catch((err) => {
+      res.status(500).json({ error: err.message });
+      captureError("web-cancel", err);
+    });
+});
+
+async function cancelAppointmentFromWeb(code) {
+  if (!dbPool) {
+    throw new Error("MySQL Database is not enabled");
+  }
+  const [result] = await dbPool.execute(
+    `
+      UPDATE appointments
+      SET status = 'cancelled'
+      WHERE appointment_code = :code
+        AND status = 'active'
+    `,
+    { code }
+  );
+  return result.affectedRows > 0;
+}
+
+
 app.get("/health", (_req, res) => {
   checkHealth().then((result) => {
     res.status(result.ok ? 200 : 503).json(result);
@@ -244,6 +280,40 @@ async function handleLineEvent(event) {
   const folderId = await getFolderId(category, organization && organization.folderName);
   const folderPath = getDriveFolderPath(category, organization);
 
+  // Buffer the stream to calculate md5Checksum and check for duplicate files in Drive
+  const chunks = [];
+  const hash = crypto.createHash("md5");
+  for await (const chunk of content.stream) {
+    chunks.push(chunk);
+    hash.update(chunk);
+  }
+  const buffer = Buffer.concat(chunks);
+  const md5Hex = hash.digest("hex");
+
+  // Check if file with same checksum already exists in target folder
+  const duplicateCheck = await drive.files.list({
+    q: `'${folderId}' in parents and md5Checksum = '${md5Hex}' and trashed = false`,
+    fields: "files(id,name,webViewLink)",
+    pageSize: 1,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+
+  const driveDuplicate = duplicateCheck.data.files && duplicateCheck.data.files[0];
+  if (driveDuplicate) {
+    console.log(
+      `Skip duplicate file upload. File already exists in folder: ${driveDuplicate.name} (ID: ${driveDuplicate.id})`
+    );
+    scheduleUploadSummary(event.source, event.replyToken, {
+      category,
+      folderPath,
+      folderId,
+      isDuplicate: true,
+      fileName: driveDuplicate.name,
+    });
+    return;
+  }
+
   await drive.files.create({
     requestBody: {
       name: metadata.fileName,
@@ -256,7 +326,7 @@ async function handleLineEvent(event) {
     },
     media: {
       mimeType: metadata.mimeType,
-      body: content.stream,
+      body: Readable.from(buffer),
     },
     fields: "id,name,webViewLink",
     supportsAllDrives: true,
@@ -813,24 +883,45 @@ async function flushUploadSummary(sourceKey) {
 }
 
 function buildUploadSummaryMessage(uploads) {
-  const total = uploads.length;
+  const newUploads = uploads.filter((u) => !u.isDuplicate);
+  const duplicates = uploads.filter((u) => u.isDuplicate);
+  const totalNew = newUploads.length;
+
   const countsByPath = new Map();
   const folderIdByPath = new Map();
 
-  for (const upload of uploads) {
+  for (const upload of newUploads) {
     countsByPath.set(upload.folderPath, (countsByPath.get(upload.folderPath) || 0) + 1);
     folderIdByPath.set(upload.folderPath, upload.folderId);
+  }
+
+  // Also include folder paths/IDs of duplicates if they aren't already listed
+  for (const upload of duplicates) {
+    if (!folderIdByPath.has(upload.folderPath)) {
+      folderIdByPath.set(upload.folderPath, upload.folderId);
+      countsByPath.set(upload.folderPath, 0);
+    }
   }
 
   const folderLines = Array.from(folderIdByPath.entries()).map(([folderPath, folderId]) => {
     const count = countsByPath.get(folderPath);
     const icon = folderPath.startsWith("Images") ? "🖼" : folderPath.startsWith("Videos") ? "🎬" : "📄";
     const thaiPath = folderPath.replace("Images", "รูปภาพ").replace("Videos", "วิดีโอ").replace("Documents", "เอกสาร");
-    return `${icon} ${thaiPath} (${count} ไฟล์)\n🔗 ${getDriveFolderLink(folderId)}`;
+    const newText = count > 0 ? ` (+${count} ไฟล์ใหม่)` : "";
+    const dupCount = duplicates.filter((d) => d.folderPath === folderPath).length;
+    const dupText = dupCount > 0 ? ` (ข้ามไฟล์ซ้ำ ${dupCount})` : "";
+    return `${icon} ${thaiPath}${newText}${dupText}\n🔗 ${getDriveFolderLink(folderId)}`;
   });
 
+  const header =
+    totalNew > 0
+      ? `✅ บันทึกไฟล์สำเร็จ ${totalNew} ไฟล์ใหม่`
+      : duplicates.length > 0
+      ? `ℹ️ ข้ามการบันทึกไฟล์ (พบไฟล์ซ้ำในระบบ)`
+      : `✅ จัดการไฟล์เรียบร้อย`;
+
   return [
-    `✅ บันทึกไฟล์สำเร็จ ${total} ไฟล์`,
+    header,
     "─────────────────",
     ...folderLines,
   ].join("\n");
@@ -1193,6 +1284,22 @@ async function getOrCreateFolder(folderName, parentFolderId) {
     fields: "id",
     supportsAllDrives: true,
   });
+
+  // Make newly created folder shared to anyone with the link can view (reader)
+  try {
+    await drive.permissions.create({
+      fileId: created.data.id,
+      requestBody: {
+        role: "reader",
+        type: "anyone",
+      },
+      supportsAllDrives: true,
+    });
+    console.log(`Shared newly created folder "${folderName}" (${created.data.id}) to anyone with the link`);
+  } catch (err) {
+    console.error(`Failed to share folder "${folderName}" (${created.data.id}):`, err.message);
+    captureError("drive-share", err);
+  }
 
   folderCache.set(cacheKey, created.data.id);
   return created.data.id;
