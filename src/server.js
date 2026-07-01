@@ -1517,15 +1517,81 @@ async function sendMorningReminders() {
         AND DATE(CONVERT_TZ(appointment_at, '+00:00', '+07:00')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+07:00'))
         AND appointment_at >= UTC_TIMESTAMP()
       ORDER BY appointment_at ASC
-      LIMIT 50
+      LIMIT 100
     `
   );
 
-  for (const appointment of rows) {
-    await pushLineMessage(appointment.source_id, buildMorningReminderMessage(appointment));
-    await dbPool.execute("UPDATE appointments SET morning_reminder_sent = 1 WHERE id = :id", {
-      id: appointment.id,
-    });
+  if (!rows.length) {
+    return;
+  }
+
+  // Group appointments by source_id to consolidate multiple notifications
+  const groups = new Map();
+  for (const appt of rows) {
+    const list = groups.get(appt.source_id) || [];
+    list.push(appt);
+    groups.set(appt.source_id, list);
+  }
+
+  // Process each group
+  for (const [sourceId, appts] of groups.entries()) {
+    let sentSuccess = false;
+
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const apptsText = appts
+          .map((a, i) => {
+            const detailStr = a.details ? ` (รายละเอียด: ${a.details})` : "";
+            return `${i + 1}. รหัส ${a.appointment_code}: "${a.title}" เวลา ${formatThaiDateTime(a.appointment_at)}${detailStr}`;
+          })
+          .join("\n");
+
+        const prompt = `
+คุณคือผู้ช่วยรายงานข่าวยามเช้าขององค์กร (LINE Bot Daily Assistant)
+วันนี้นัดหมายทั้งหมดในระบบของกลุ่มนี้มีดังนี้:
+${apptsText}
+
+ภารกิจของคุณ:
+1. เขียนข้อความทักทายยามเช้าภาษาไทยที่เป็นกันเอง สุภาพ และอบอุ่น (เช่น "สวัสดีเช้าวันพุธค่ะทุกคน...")
+2. เรียบเรียงรายการนัดหมายของวันนี้ให้อ่านง่าย ชัดเจน (ระบุหัวข้อ เวลา และรายละเอียดให้ครบถ้วน)
+3. สอดแทรกคำอวยพรหรือข้อคิดสั้น ๆ ที่ให้พลังบวกในการเริ่มต้นทำงานไว้ตอนท้ายข้อความ
+4. คืนค่าเฉพาะข้อความทักทายและสรุปที่พร้อมส่งให้ผู้ใช้อ่านทันที ไม่ต้องเกริ่นนำหรือใส่คำสั่งใดๆ
+`;
+
+        const briefing = await callGeminiGenerateContent([{ text: prompt }]);
+
+        await pushLineMessage(
+          sourceId,
+          [
+            "🌅 รายงานนัดหมายยามเช้าโดย AI",
+            "─────────────────",
+            briefing,
+          ].join("\n")
+        );
+        sentSuccess = true;
+      } catch (err) {
+        console.error(`Failed to generate AI morning briefing for ${sourceId}:`, err);
+        captureError("morning-briefing-ai", err);
+      }
+    }
+
+    // Fallback: If AI fails or is unconfigured, send standard individual messages
+    if (!sentSuccess) {
+      for (const appointment of appts) {
+        try {
+          await pushLineMessage(sourceId, buildMorningReminderMessage(appointment));
+        } catch (pushErr) {
+          console.error(`Failed to send standard morning reminder for appt ${appointment.id}:`, pushErr);
+        }
+      }
+    }
+
+    // Mark all these appointments as sent
+    for (const appointment of appts) {
+      await dbPool.execute("UPDATE appointments SET morning_reminder_sent = 1 WHERE id = :id", {
+        id: appointment.id,
+      });
+    }
   }
 }
 
