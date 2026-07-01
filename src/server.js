@@ -225,9 +225,6 @@ async function handleLineEvent(event) {
       description: metadata.description,
       appProperties: {
         lineMessageId: messageId,
-        lineSourceType: event.source && event.source.type ? event.source.type : "",
-        lineSourceId: getSourceId(event.source),
-        organizationFolder: organization ? organization.folderName : "",
       },
     },
     media: {
