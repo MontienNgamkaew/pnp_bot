@@ -510,43 +510,21 @@ Return ONLY the JSON matching the schema.
 `;
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+    const generationConfig = {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          title: { type: "STRING", description: "The main title/topic of the appointment" },
+          dateTime: { type: "STRING", description: "The date and time of the appointment in YYYY-MM-DD HH:mm format." },
+          details: { type: "STRING", description: "Any other details such as location or note. If none, leave blank." },
         },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: {
-                title: { type: "STRING", description: "The main title/topic of the appointment" },
-                dateTime: { type: "STRING", description: "The date and time of the appointment in YYYY-MM-DD HH:mm format." },
-                details: { type: "STRING", description: "Any other details such as location or note. If none, leave blank." },
-              },
-              required: ["title", "dateTime"],
-            },
-          },
-        }),
-      }
-    );
+        required: ["title", "dateTime"],
+      },
+    };
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini API returned status ${response.status}: ${errText}`);
-    }
-
-    const resJson = await response.json();
-    const responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!responseText) {
-      throw new Error("Invalid response structure from Gemini API");
-    }
-
-    const result = JSON.parse(responseText.trim());
+    const responseText = await callGeminiGenerateContent([{ text: prompt }], generationConfig);
+    const result = JSON.parse(responseText);
     if (!result.title || !result.dateTime) {
       throw new Error("AI could not extract title or date/time from the text.");
     }
@@ -934,32 +912,59 @@ async function generateMultimodalSummary(files, customInstruction, additionalTex
   return callGeminiGenerateContent(parts);
 }
 
-async function callGeminiGenerateContent(parts) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        contents: [{ parts }],
-      }),
+async function callGeminiGenerateContent(parts, generationConfig = null) {
+  const models = ["gemini-2.5-flash", "gemini-1.5-flash"];
+  let lastError = null;
+
+  for (const model of models) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const body = {
+          contents: [{ parts }],
+        };
+        if (generationConfig) {
+          body.generationConfig = generationConfig;
+        }
+
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          }
+        );
+
+        if (response.status === 503 || response.status === 429) {
+          const delay = attempt * 1500;
+          console.warn(`Gemini API returned ${response.status} for ${model}. Retrying in ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Gemini API returned status ${response.status}: ${errText}`);
+        }
+
+        const resJson = await response.json();
+        const responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!responseText) {
+          throw new Error("Invalid response structure from Gemini API");
+        }
+
+        return responseText.trim();
+      } catch (err) {
+        console.error(`Attempt ${attempt} for model ${model} failed:`, err.message);
+        lastError = err;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
     }
-  );
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini API returned status ${response.status}: ${errText}`);
   }
 
-  const resJson = await response.json();
-  const responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!responseText) {
-    throw new Error("Invalid response structure from Gemini API");
-  }
-
-  return responseText.trim();
+  throw lastError || new Error("Failed to call Gemini API");
 }
 
 function createGoogleAuth() {
