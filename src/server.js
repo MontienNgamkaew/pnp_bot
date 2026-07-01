@@ -480,15 +480,25 @@ async function createAppointmentNatural(event, text) {
   const now = new Date();
   const formattedNow = formatThaiDateTime(now);
   const nowISO = now.toISOString();
+  
+  // Get Bangkok parts to generate accurate Christian Era representation
+  const bangkokParts = getBangkokDateParts(now);
+  const nowADString = `${bangkokParts.year}-${String(bangkokParts.month).padStart(2, "0")}-${String(bangkokParts.day).padStart(2, "0")} ${String(bangkokParts.hour).padStart(2, "0")}:${String(bangkokParts.minute).padStart(2, "0")}`;
 
   const prompt = `
 You are an assistant parsing a LINE chat appointment request into structured JSON data.
-Current Time (Bangkok Time): ${formattedNow} (ISO: ${nowISO})
+Current Time (Bangkok Time):
+- Buddhist Era (พ.ศ.): ${formattedNow}
+- Christian Era (ค.ศ. / A.D.): ${nowADString}
 User Input Text: "${text}"
 
 Parse the user input text to extract:
 1. "title": The main subject or topic of the meeting/appointment.
-2. "dateTime": The date and time of the appointment. It MUST be returned in the format "YYYY-MM-DD HH:mm" based on Bangkok Time. Make sure to calculate relative terms like "วันพรุ่งนี้" (tomorrow, current + 1 day), "วันนี้" (today, current day), "เวลา 14.00 น." -> "14:00" correctly.
+2. "dateTime": The date and time of the appointment. It MUST be returned in the format "YYYY-MM-DD HH:mm" based on Bangkok Time where YYYY is the Christian Era (A.D. / ค.ศ.) year (e.g. 2026).
+   - Crucial (Year Conversion): The user may specify the year in Buddhist Era (พ.ศ. / B.E.) e.g. "2569", "พ.ศ. 2570", "69" OR in Christian Era (ค.ศ. / A.D.) e.g. "2026", "2027", "26". You must identify which era is used and output the YYYY year in Christian Era (A.D.):
+     * If the user specifies the year in Buddhist Era (พ.ศ. / B.E.), you MUST convert it to Christian Era (A.D.) by subtracting 543. For example: "2569" or "69" -> "2026", "2570" or "70" -> "2027". Do NOT output the year as "2569" or "2069".
+     * If the user specifies the year in Christian Era (ค.ศ. / A.D.), keep it as Christian Era (A.D.). For example: "2026" or "26" -> "2026", "2027" -> "2027".
+   - Make sure to calculate relative terms like "วันพรุ่งนี้" (tomorrow, current + 1 day), "วันนี้" (today, current day), "เวลา 14.00 น." -> "14:00" correctly.
 3. "details": Any location (e.g. ห้องประชุมมโนไพร), attendees, or extra description.
 
 Return ONLY the JSON matching the schema.
@@ -1107,7 +1117,10 @@ function parseBangkokDateTime(value) {
   }
 
   const [, yearText, monthText, dayText, hourText, minuteText] = match;
-  const year = Number(yearText);
+  let year = Number(yearText);
+  if (year > 2400) {
+    year -= 543; // แปลง พ.ศ. → ค.ศ.
+  }
   const month = Number(monthText);
   const day = Number(dayText);
   const hour = Number(hourText);
