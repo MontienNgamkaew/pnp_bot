@@ -1738,7 +1738,7 @@ function getBangkokDateParts(date) {
     year: Number(parts.year),
     month: Number(parts.month),
     day: Number(parts.day),
-    hour: Number(parts.hour),
+    hour: Number(parts.hour) % 24,
     minute: Number(parts.minute),
   };
 }
