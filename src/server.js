@@ -458,8 +458,16 @@ async function handleAppointmentCommand(event, command) {
     return;
   }
 
-  if (command.type === "appointment.cancel") {
-    await cancelAppointment(event, command.code);
+  if (command.type === "appointment.cancel_natural") {
+    if (!command.text) {
+      await replyLineMessage(
+        event.replyToken,
+        "❌ กรุณาระบุข้อความยกเลิกนัดหมายด้วยค่ะ\nตัวอย่าง: /ยกเลิกนัด ประชุมโครงการวันพรุ่งนี้"
+      );
+      return;
+    }
+    await handleNaturalLanguageCommand(event, command.text, "cancel");
+    return;
   }
 }
 
@@ -502,7 +510,6 @@ async function createAppointment(event, command) {
       "─────────────────",
       `📌 ${command.title}`,
       `🕐 ${formatThaiDateTime(appointmentAt)}`,
-      `🔖 รหัส: ${code}`,
       command.details ? `📝 ${command.details}` : "",
     ]
       .filter(Boolean)
@@ -566,6 +573,8 @@ async function handleNaturalLanguageCommand(event, text, forcedIntent = null) {
   let forcedIntentInstruction = "";
   if (forcedIntent === "update") {
     forcedIntentInstruction = `\nCRITICAL: The user has explicitly requested to UPDATE/RESCHEDULE an appointment. You MUST select "update" as the action (or "error" if no matching appointment is found or if it is completely ambiguous). Do NOT select "create", "cancel", "list", or "general".\n`;
+  } else if (forcedIntent === "cancel") {
+    forcedIntentInstruction = `\nCRITICAL: The user has explicitly requested to CANCEL an appointment. You MUST select "cancel" as the action (or "error" if no matching appointment is found or if it is completely ambiguous). Do NOT select "create", "update", "list", or "general".\n`;
   }
 
   // 3. Build prompt for Gemini to classify intent and extract details
@@ -727,7 +736,6 @@ Return ONLY a JSON object matching this schema. Do not output markdown block wra
           "─────────────────",
           `📌 ${data.title}`,
           `🕐 ${formatThaiDateTime(appointmentAt)}`,
-          `🔖 รหัส: ${code}`,
           data.details ? `📝 ${data.details}` : "",
         ]
           .filter(Boolean)
@@ -825,7 +833,6 @@ Return ONLY a JSON object matching this schema. Do not output markdown block wra
         timeChanged 
           ? `🕐 ${formatThaiDateTime(current.appointment_at)} ➡️ ${formatThaiDateTime(newTime)}`
           : `🕐 ${formatThaiDateTime(newTime)}`,
-        `🔖 รหัส: ${code.toUpperCase()}`,
         newDetails ? `📝 ${newDetails}` : "",
       ]
         .filter(Boolean)
@@ -875,7 +882,7 @@ async function listAppointments(event) {
       "─────────────────",
       ...rows.map((row) => {
         const details = row.details ? `\n📝 ${row.details}` : "";
-        return `📌 ${row.title}\n🕐 ${formatThaiDateTime(row.appointment_at)}\n🔖 ${row.appointment_code}${details}`;
+        return `📌 ${row.title}\n🕐 ${formatThaiDateTime(row.appointment_at)}${details}`;
       }),
     ].join("\n\n")
   );
@@ -911,11 +918,12 @@ function getAppointmentHelpMessage() {
     "/นัด หัวข้อ DD/MM/YYYY HH.mm สถานที่",
     "/นัดหมาย — ดูตารางนัดหมาย",
     "/เลื่อนนัด ข้อความภาษาธรรมชาติ — เลื่อนเวลานัดหมาย",
-    "/ยกเลิกนัด รหัส",
+    "/ยกเลิกนัด ข้อความภาษาธรรมชาติ — ยกเลิกนัดหมาย",
     "",
     "💡 ตัวอย่าง",
     "/นัด อบรมต่อต้านยาเสพติด 30/06/2569 13.30 ห้องประชุมเอราวรรณ",
     "/เลื่อนนัด ประชุมโครงการเอเป็นพรุ่งนี้สิบโมงเช้า",
+    "/ยกเลิกนัด ประชุมโครงการเอพรุ่งนี้",
   ].join("\n");
 }
 
@@ -1455,9 +1463,9 @@ function parseAppointmentCommand(text) {
     return { type: "appointment.list" };
   }
 
-  const cancelMatch = text.match(/^\/(?:ยกเลิกนัด|cancelappt)\s+([A-Za-z0-9-]+)$/i);
+  const cancelMatch = text.match(/^\/(?:ยกเลิกนัด|cancelappt)(?:\s*(.*))$/i);
   if (cancelMatch) {
-    return { type: "appointment.cancel", code: cancelMatch[1].toUpperCase() };
+    return { type: "appointment.cancel_natural", text: (cancelMatch[1] || "").trim() };
   }
 
   const rescheduleMatch = text.match(/^\/(?:เลื่อนนัดหมาย|เลื่อนนัด|reschedule)(?:\s*(.*))$/i);
@@ -1503,7 +1511,7 @@ function getHelpMessage() {
     "/นัด หัวข้อ DD/MM/YYYY HH.mm สถานที่",
     "/นัดหมาย — ดูนัดหมายที่กำลังจะมาถึง",
     "/เลื่อนนัด ข้อความ — เลื่อนนัดด้วยภาษาธรรมชาติ",
-    "/ยกเลิกนัด รหัส",
+    "/ยกเลิกนัด ข้อความ — ยกเลิกนัดด้วยภาษาธรรมชาติ",
     "",
     "🤖 คุยและสั่งการด้วย AI (ภาษาธรรมชาติ)",
     "พิมพ์ขึ้นต้นด้วย 'บอต' หรือ 'บอท' หรือ 'bot' เช่น:",
@@ -1520,6 +1528,7 @@ function getHelpMessage() {
     "💡 ตัวอย่าง",
     "/folder งานประชุม",
     "/เลื่อนนัด เลื่อนประชุมเป็นวันจันทร์หน้าสิบโมงเช้า",
+    "/ยกเลิกนัด ยกเลิกประชุมเย็นนี้",
     "กดตอบกลับที่รูปภาพ -> พิมพ์ /สรุป",
   ].join("\n");
 }
@@ -1941,7 +1950,6 @@ function buildMorningReminderMessage(appointment) {
     "─────────────────",
     `📌 ${appointment.title}`,
     `🕐 ${formatThaiDateTime(appointment.appointment_at)}`,
-    `🔖 รหัส: ${appointment.appointment_code}`,
     appointment.details ? `📝 ${appointment.details}` : "",
   ]
     .filter(Boolean)
@@ -1954,7 +1962,6 @@ function buildTenMinuteReminderMessage(appointment) {
     "─────────────────",
     `📌 ${appointment.title}`,
     `🕐 ${formatThaiDateTime(appointment.appointment_at)}`,
-    `🔖 รหัส: ${appointment.appointment_code}`,
     appointment.details ? `📝 ${appointment.details}` : "",
   ]
     .filter(Boolean)
