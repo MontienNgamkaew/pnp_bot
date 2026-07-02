@@ -17,7 +17,7 @@ const {
   GOOGLE_DRIVE_VIDEO_FOLDER_ID,
   GOOGLE_DRIVE_DOCUMENT_FOLDER_ID,
   SUMMARY_DELAY_SECONDS = 45,
-  REMINDER_MORNING_HOUR = 8,
+  REMINDER_MORNING_HOUR = 7,
   REMINDER_CHECK_INTERVAL_SECONDS = 60,
   RESTART_SECRET,
   PORT = 3000,
@@ -59,7 +59,7 @@ const summaryDelayMs =
   Number.isFinite(configuredSummaryDelaySeconds) && configuredSummaryDelaySeconds > 0
     ? configuredSummaryDelaySeconds * 1000
     : 45000;
-const reminderMorningHour = getPositiveInteger(REMINDER_MORNING_HOUR, 8);
+const reminderMorningHour = getPositiveInteger(REMINDER_MORNING_HOUR, 7);
 const reminderCheckIntervalMs = getPositiveInteger(REMINDER_CHECK_INTERVAL_SECONDS, 60) * 1000;
 
 app.get("/", (_req, res) => {
