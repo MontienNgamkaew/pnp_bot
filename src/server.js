@@ -1344,6 +1344,15 @@ async function initializeDatabase() {
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
   `);
 
+  await dbPool.execute(`
+    CREATE TABLE IF NOT EXISTS daily_briefings_sent (
+      source_id VARCHAR(80) NOT NULL,
+      sent_date DATE NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (source_id, sent_date)
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+  `);
+
   console.log("Appointment database is ready");
 }
 
@@ -1775,55 +1784,66 @@ async function checkAppointmentReminders() {
 }
 
 async function sendMorningReminders() {
-  const nowParts = getBangkokDateParts(new Date());
+  const now = new Date();
+  const nowParts = getBangkokDateParts(now);
   if (nowParts.hour < reminderMorningHour) {
     return;
   }
 
-  const [rows] = await dbPool.execute(
-    `
-      SELECT id, source_id, appointment_code, title, details, appointment_at
-      FROM appointments
-      WHERE status = 'active'
-        AND morning_reminder_sent = 0
-        AND DATE(CONVERT_TZ(appointment_at, '+00:00', '+07:00')) = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+07:00'))
-        AND appointment_at >= UTC_TIMESTAMP()
-      ORDER BY appointment_at ASC
-      LIMIT 100
-    `
-  );
+  const todayDateString = `${nowParts.year}-${String(nowParts.month).padStart(2, "0")}-${String(nowParts.day).padStart(2, "0")}`;
 
-  if (!rows.length) {
-    return;
-  }
+  // Get all unique active sources that have appointments
+  const [sources] = await dbPool.execute(`
+    SELECT DISTINCT source_id 
+    FROM appointments 
+    WHERE source_id != 'unknown-source'
+  `);
 
-  // Group appointments by source_id to consolidate multiple notifications
-  const groups = new Map();
-  for (const appt of rows) {
-    const list = groups.get(appt.source_id) || [];
-    list.push(appt);
-    groups.set(appt.source_id, list);
-  }
+  for (const source of sources) {
+    const sourceId = source.source_id;
 
-  // Process each group
-  for (const [sourceId, appts] of groups.entries()) {
+    // Check if daily briefing has already been sent to this source today
+    const [briefingSent] = await dbPool.execute(
+      `SELECT 1 FROM daily_briefings_sent WHERE source_id = :sourceId AND sent_date = :todayDateString`,
+      { sourceId, todayDateString }
+    );
+
+    if (briefingSent.length > 0) {
+      continue; // Already sent for this group today
+    }
+
+    // Fetch active appointments for this source scheduled for today
+    const [appts] = await dbPool.execute(
+      `
+        SELECT id, appointment_code, title, details, appointment_at
+        FROM appointments
+        WHERE status = 'active'
+          AND source_id = :sourceId
+          AND DATE(CONVERT_TZ(appointment_at, '+00:00', '+07:00')) = :todayDateString
+          AND appointment_at >= UTC_TIMESTAMP()
+        ORDER BY appointment_at ASC
+      `,
+      { sourceId, todayDateString }
+    );
+
     let sentSuccess = false;
 
-    if (process.env.GEMINI_API_KEY) {
-      try {
-        const apptsText = appts
-          .map((a, i) => {
-            const detailStr = a.details ? ` (รายละเอียด: ${a.details})` : "";
-            return `${i + 1}. รหัส ${a.appointment_code}: "${a.title}" เวลา ${formatThaiDateTime(a.appointment_at)}${detailStr}`;
-          })
-          .join("\n");
+    if (appts.length > 0) {
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const apptsText = appts
+            .map((a, i) => {
+              const detailStr = a.details ? ` (รายละเอียด: ${a.details})` : "";
+              return `${i + 1}. รหัส ${a.appointment_code}: "${a.title}" เวลา ${formatThaiDateTime(a.appointment_at)}${detailStr}`;
+            })
+            .join("\n");
 
-        const thaiFormattedDate = new Intl.DateTimeFormat("th-TH", {
-          timeZone: "Asia/Bangkok",
-          dateStyle: "full",
-        }).format(new Date());
+          const thaiFormattedDate = new Intl.DateTimeFormat("th-TH", {
+            timeZone: "Asia/Bangkok",
+            dateStyle: "full",
+          }).format(now);
 
-        const prompt = `
+          const prompt = `
 คุณคือผู้ช่วยรายงานข่าวยามเช้าขององค์กร (LINE Bot Daily Assistant)
 วันเวลาปัจจุบัน (เวลาประเทศไทย): ${thaiFormattedDate}
 
@@ -1837,32 +1857,58 @@ ${apptsText}
 4. คืนค่าเฉพาะข้อความทักทายและสรุปที่พร้อมส่งให้ผู้ใช้อ่านทันที ไม่ต้องเกริ่นนำหรือใส่คำสั่งใดๆ
 `;
 
-        const briefing = await callGeminiGenerateContent([{ text: prompt }]);
+          const briefing = await callGeminiGenerateContent([{ text: prompt }]);
 
-        await pushLineMessage(sourceId, briefing);
-        sentSuccess = true;
-      } catch (err) {
-        console.error(`Failed to generate AI morning briefing for ${sourceId}:`, err);
-        captureError("morning-briefing-ai", err);
-      }
-    }
-
-    // Fallback: If AI fails or is unconfigured, send standard individual messages
-    if (!sentSuccess) {
-      for (const appointment of appts) {
-        try {
-          await pushLineMessage(sourceId, buildMorningReminderMessage(appointment));
-        } catch (pushErr) {
-          console.error(`Failed to send standard morning reminder for appt ${appointment.id}:`, pushErr);
+          await pushLineMessage(sourceId, briefing);
+          sentSuccess = true;
+        } catch (err) {
+          console.error(`Failed to generate AI morning briefing for ${sourceId}:`, err);
+          captureError("morning-briefing-ai", err);
         }
       }
+
+      // Fallback: If AI fails or is unconfigured, send standard individual messages
+      if (!sentSuccess) {
+        for (const appointment of appts) {
+          try {
+            await pushLineMessage(sourceId, buildMorningReminderMessage(appointment));
+          } catch (pushErr) {
+            console.error(`Failed to send standard morning reminder for appt ${appointment.id}:`, pushErr);
+          }
+        }
+      }
+
+      // Mark all these appointments as sent
+      for (const appointment of appts) {
+        await dbPool.execute("UPDATE appointments SET morning_reminder_sent = 1 WHERE id = :id", {
+          id: appointment.id,
+        });
+      }
+    } else {
+      // No appointments today: Send default greeting
+      try {
+        const thaiFormattedDate = new Intl.DateTimeFormat("th-TH", {
+          timeZone: "Asia/Bangkok",
+          dateStyle: "full",
+        }).format(now);
+
+        const greetingText = `สวัสดีเช้า${thaiFormattedDate}ค่ะทุกคน ☀️\n\nวันนี้ยังไม่มีนัดหมายในระบบนะคะ\n\n💡 สามารถเพิ่มนัดหมายได้โดยพิมพ์ /นัด ตามด้วยชื่อเรื่อง วันที่ เวลา และสถานที่ที่ต้องการได้เลยค่ะ (เช่น /นัด ประชุมโครงการเอ 10.00 น.)`;
+        
+        await pushLineMessage(sourceId, greetingText);
+      } catch (err) {
+        console.error(`Failed to send standard empty morning reminder for ${sourceId}:`, err);
+        captureError("morning-briefing-empty", err);
+      }
     }
 
-    // Mark all these appointments as sent
-    for (const appointment of appts) {
-      await dbPool.execute("UPDATE appointments SET morning_reminder_sent = 1 WHERE id = :id", {
-        id: appointment.id,
-      });
+    // Record that we have sent a briefing (either filled or empty) for this group today
+    try {
+      await dbPool.execute(
+        `INSERT INTO daily_briefings_sent (source_id, sent_date) VALUES (:sourceId, :todayDateString)`,
+        { sourceId, todayDateString }
+      );
+    } catch (dbErr) {
+      console.error(`Failed to log briefing sent to daily_briefings_sent for ${sourceId}:`, dbErr);
     }
   }
 }
