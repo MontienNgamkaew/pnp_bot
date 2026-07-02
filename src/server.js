@@ -442,6 +442,13 @@ async function handleAppointmentCommand(event, command) {
   }
 
   if (command.type === "appointment.reschedule_natural") {
+    if (!command.text) {
+      await replyLineMessage(
+        event.replyToken,
+        "❌ กรุณาระบุข้อความเลื่อนนัดหมายด้วยค่ะ\nตัวอย่าง: /เลื่อนนัด ประชุมโครงการเป็นพรุ่งนี้ 10.00 น."
+      );
+      return;
+    }
     await handleNaturalLanguageCommand(event, command.text, "update");
     return;
   }
@@ -1444,9 +1451,9 @@ function parseAppointmentCommand(text) {
     return { type: "appointment.cancel", code: cancelMatch[1].toUpperCase() };
   }
 
-  const rescheduleMatch = text.match(/^\/(?:เลื่อนนัด|reschedule)\s+(.+)$/i);
+  const rescheduleMatch = text.match(/^\/(?:เลื่อนนัดหมาย|เลื่อนนัด|reschedule)(?:\s*(.*))$/i);
   if (rescheduleMatch) {
-    return { type: "appointment.reschedule_natural", text: rescheduleMatch[1].trim() };
+    return { type: "appointment.reschedule_natural", text: (rescheduleMatch[1] || "").trim() };
   }
 
   const createMatch = text.match(/^\/(?:นัด|appointment)\s+(.+)$/i);
