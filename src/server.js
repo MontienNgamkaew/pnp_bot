@@ -581,6 +581,10 @@ async function handleNaturalLanguageCommand(event, text, forcedIntent = null) {
   const prompt = `
 You are an AI assistant for a LINE group chat bot. Your job is to analyze the user's message and determine their intent regarding appointments or general chatting, and return a structured JSON response.
 ${forcedIntentInstruction}
+
+CRITICAL TONE & GENDER INSTRUCTION:
+- You represent a FEMALE assistant bot. You must ALWAYS use feminine polite particles ('ค่ะ', 'คะ', 'นะคะ') in your Thai responses (under 'generalResponse' or 'explanation').
+- NEVER use masculine particles like 'ครับ' or 'นะครับ'.
 Current Time (Bangkok Time):
 - Buddhist Era (พ.ศ.): ${formattedNow}
 - Christian Era (ค.ศ. / A.D.): ${nowADString}
@@ -1133,6 +1137,9 @@ async function generateTextSummary(text, customInstruction) {
 คุณคือผู้ช่วยสรุปรายงานการประชุมและเอกสารขององค์กร
 ข้อความต่อไปนี้เป็นข้อความที่สกัดมาจากเอกสารที่ผู้ใช้ส่งเข้ามาในกลุ่ม LINE
 
+ข้อบังคับเรื่องภาษาและหางเสียง:
+- คุณต้องสวมบทบาทเป็นผู้หญิงเสมอ โดยใช้หางเสียงลงท้ายประโยคด้วยคำว่า "ค่ะ", "คะ" หรือ "นะคะ" เท่านั้น ห้ามใช้หางเสียงผู้ชาย (เช่น "ครับ", "นะครับ") โดยเด็ดขาด
+
 ภารกิจของคุณ:
 1. สรุปเนื้อหาต่อไปนี้เป็น "ภาษาไทย"
 2. ${instruction}
@@ -1154,6 +1161,9 @@ async function generateMultimodalSummary(files, customInstruction, additionalTex
   let prompt = `
 คุณคือผู้ช่วยสรุปรายงานการประชุมและเอกสารขององค์กร
 ข้อความหรือภาพต่อไปนี้เป็นเอกสารหรือรูปภาพที่ผู้ใช้ส่งเข้ามาในกลุ่ม LINE
+
+ข้อบังคับเรื่องภาษาและหางเสียง:
+- คุณต้องสวมบทบาทเป็นผู้หญิงเสมอ โดยใช้หางเสียงลงท้ายประโยคด้วยคำว่า "ค่ะ", "คะ" หรือ "นะคะ" เท่านั้น ห้ามใช้หางเสียงผู้ชาย (เช่น "ครับ", "นะครับ") โดยเด็ดขาด
 
 ภารกิจของคุณ:
 1. อ่านข้อความที่ปรากฏในรูปภาพหรือเอกสาร PDF สแกนทั้งหมดที่แนบมานี้
@@ -1864,6 +1874,7 @@ ${apptsText}
 2. เรียบเรียงรายการนัดหมายของวันนี้ให้อ่านง่าย ชัดเจน (ระบุหัวข้อ เวลา และรายละเอียดให้ครบถ้วน)
 3. สอดแทรกคำอวยพรหรือข้อคิดสั้น ๆ ที่ให้พลังบวกในการเริ่มต้นทำงานไว้ตอนท้ายข้อความ
 4. คืนค่าเฉพาะข้อความทักทายและสรุปที่พร้อมส่งให้ผู้ใช้อ่านทันที ไม่ต้องเกริ่นนำหรือใส่คำสั่งใดๆ
+5. คุณต้องสวมบทบาทเป็นผู้หญิงเสมอ โดยใช้หางเสียงลงท้ายประโยคด้วยคำว่า "ค่ะ", "คะ" หรือ "นะคะ" เท่านั้น ห้ามใช้หางเสียงผู้ชาย (เช่น "ครับ", "นะครับ") โดยเด็ดขาด
 `;
 
           const briefing = await callGeminiGenerateContent([{ text: prompt }]);
