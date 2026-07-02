@@ -278,8 +278,17 @@ async function handleLineEvent(event) {
   const content = await fetchLineContent(messageId);
   const organization = getActiveOrganization(event.source);
   const metadata = buildDriveFileMetadata(event, category, content.contentType, organization);
-  const folderId = await getFolderId(category, organization && organization.folderName);
-  const folderPath = getDriveFolderPath(category, organization);
+
+  const parentFolderId = await getFolderId(category, organization && organization.folderName);
+  const parentFolderPath = getDriveFolderPath(category, organization);
+
+  // Generate date folder name in YYYY-MM-DD BE format (e.g. 2569-07-02)
+  const nowParts = getBangkokDateParts(new Date());
+  const beYear = nowParts.year + 543;
+  const dateString = `${beYear}-${String(nowParts.month).padStart(2, "0")}-${String(nowParts.day).padStart(2, "0")}`;
+
+  const folderId = await getOrCreateFolder(dateString, parentFolderId);
+  const folderPath = `${parentFolderPath}/${dateString}`;
 
   // Buffer the stream to calculate md5Checksum and check for duplicate files in Drive
   const chunks = [];
@@ -334,7 +343,7 @@ async function handleLineEvent(event) {
   });
 
   console.log(
-    `Uploaded ${category}${organization ? `/${organization.folderName}` : ""}: ${metadata.fileName}`
+    `Uploaded to ${folderPath}: ${metadata.fileName}`
   );
 
   scheduleUploadSummary(event.source, event.replyToken, {
