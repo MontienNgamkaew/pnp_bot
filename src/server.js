@@ -345,7 +345,32 @@ async function handleLineEvent(event) {
 }
 
 async function handleTextCommand(event) {
-  const command = parseCommand(event.message.text || "");
+  const text = event.message.text || "";
+  const botPrefixRegex = /^(?:บอต|บอท|@?bot(?![a-zA-Z]))(?:\s+|,|:)*(.*)$/i;
+  const botPrefixMatch = text.trim().match(botPrefixRegex);
+
+  if (botPrefixMatch) {
+    const queryText = botPrefixMatch[1].trim();
+    if (!queryText) {
+      await replyLineMessage(
+        event.replyToken,
+        [
+          "🤖 สวัสดีค่ะ! มีอะไรให้บอตช่วยเหลือไหมคะ?",
+          "─────────────────",
+          "• *นัดหมายใหม่*: 'บอต นัดประชุมวันพรุ่งนี้ 10 โมง'",
+          "• *เลื่อนนัดหมาย*: 'บอต เลื่อนนัดประชุมโครงการเป็นบ่ายสาม'",
+          "• *ยกเลิกนัดหมาย*: 'บอต ยกเลิกนัดเย็นนี้'",
+          "• *ดูนัดหมาย*: 'บอต วันนี้มีประชุมอะไรบ้าง'",
+          "• *คุยทั่วไป*: ถามข้อสงสัยหรือพูดคุยทั่วไปกับบอตได้เลยค่ะ"
+        ].join("\n")
+      );
+      return;
+    }
+    await handleNaturalLanguageCommand(event, queryText);
+    return;
+  }
+
+  const command = parseCommand(text);
   if (!command) {
     return;
   }
@@ -416,6 +441,11 @@ async function handleAppointmentCommand(event, command) {
     return;
   }
 
+  if (command.type === "appointment.reschedule_natural") {
+    await handleNaturalLanguageCommand(event, command.text, "update");
+    return;
+  }
+
   if (command.type === "appointment.list") {
     await listAppointments(event);
     return;
@@ -474,39 +504,103 @@ async function createAppointment(event, command) {
 }
 
 async function createAppointmentNatural(event, text) {
-  if (!process.env.GEMINI_API_KEY) {
+  // Delegate to the unified natural language command handler
+  await handleNaturalLanguageCommand(event, text);
+}
+
+async function handleNaturalLanguageCommand(event, text, forcedIntent = null) {
+  if (!dbPool) {
     await replyLineMessage(
       event.replyToken,
-      "❌ ยังไม่ได้เปิดใช้งานระบบวิเคราะห์นัดหมายด้วย AI (กรุณาตั้งค่า GEMINI_API_KEY ในสภาพแวดล้อมของเซิร์ฟเวอร์)"
+      "ยังไม่ได้เปิดใช้งานระบบนัดหมาย กรุณาตั้งค่า DB_HOST, DB_USER, DB_PASSWORD และ DB_NAME บน Hostinger"
     );
     return;
   }
 
+  if (!process.env.GEMINI_API_KEY) {
+    await replyLineMessage(
+      event.replyToken,
+      "❌ ยังไม่ได้เปิดใช้งานระบบ AI (กรุณาตั้งค่า GEMINI_API_KEY ในสภาพแวดล้อมของเซิร์ฟเวอร์)"
+    );
+    return;
+  }
+
+  // 1. Fetch active appointments for the source
+  const [activeAppointments] = await dbPool.execute(
+    `
+      SELECT appointment_code, title, details, appointment_at
+      FROM appointments
+      WHERE source_type = :sourceType
+        AND source_id = :sourceId
+        AND status = 'active'
+        AND appointment_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)
+      ORDER BY appointment_at ASC
+      LIMIT 30
+    `,
+    {
+      sourceType: event.source && event.source.type ? event.source.type : "unknown",
+      sourceId: getSourceId(event.source),
+    }
+  );
+
+  // 2. Format the active appointments list for Gemini context
+  const formattedAppts = activeAppointments.map((appt) => {
+    return `- Code: ${appt.appointment_code}
+  Title: "${appt.title}"
+  Time: ${formatThaiDateTime(appt.appointment_at)} (Christian Era Year: ${getBangkokDateParts(appt.appointment_at).year})
+  Details: "${appt.details || ''}"`;
+  }).join("\n");
+
   const now = new Date();
   const formattedNow = formatThaiDateTime(now);
-  const nowISO = now.toISOString();
-  
-  // Get Bangkok parts to generate accurate Christian Era representation
   const bangkokParts = getBangkokDateParts(now);
   const nowADString = `${bangkokParts.year}-${String(bangkokParts.month).padStart(2, "0")}-${String(bangkokParts.day).padStart(2, "0")} ${String(bangkokParts.hour).padStart(2, "0")}:${String(bangkokParts.minute).padStart(2, "0")}`;
 
+  let forcedIntentInstruction = "";
+  if (forcedIntent === "update") {
+    forcedIntentInstruction = `\nCRITICAL: The user has explicitly requested to UPDATE/RESCHEDULE an appointment. You MUST select "update" as the action (or "error" if no matching appointment is found or if it is completely ambiguous). Do NOT select "create", "cancel", "list", or "general".\n`;
+  }
+
+  // 3. Build prompt for Gemini to classify intent and extract details
   const prompt = `
-You are an assistant parsing a LINE chat appointment request into structured JSON data.
+You are an AI assistant for a LINE group chat bot. Your job is to analyze the user's message and determine their intent regarding appointments or general chatting, and return a structured JSON response.
+${forcedIntentInstruction}
 Current Time (Bangkok Time):
 - Buddhist Era (พ.ศ.): ${formattedNow}
 - Christian Era (ค.ศ. / A.D.): ${nowADString}
-User Input Text: "${text}"
 
-Parse the user input text to extract:
-1. "title": The main subject or topic of the meeting/appointment.
-2. "dateTime": The date and time of the appointment. It MUST be returned in the format "YYYY-MM-DD HH:mm" based on Bangkok Time where YYYY is the Christian Era (A.D. / ค.ศ.) year (e.g. 2026).
-   - Crucial (Year Conversion): The user may specify the year in Buddhist Era (พ.ศ. / B.E.) e.g. "2569", "พ.ศ. 2570", "69" OR in Christian Era (ค.ศ. / A.D.) e.g. "2026", "2027", "26". You must identify which era is used and output the YYYY year in Christian Era (A.D.):
-     * If the user specifies the year in Buddhist Era (พ.ศ. / B.E.), you MUST convert it to Christian Era (A.D.) by subtracting 543. For example: "2569" or "69" -> "2026", "2570" or "70" -> "2027". Do NOT output the year as "2569" or "2069".
-     * If the user specifies the year in Christian Era (ค.ศ. / A.D.), keep it as Christian Era (A.D.). For example: "2026" or "26" -> "2026", "2027" -> "2027".
-   - Make sure to calculate relative terms like "วันพรุ่งนี้" (tomorrow, current + 1 day), "วันนี้" (today, current day), "เวลา 14.00 น." -> "14:00" correctly.
-3. "details": Any location (e.g. ห้องประชุมมโนไพร), attendees, or extra description.
+Active Upcoming/Recent Appointments in this group:
+${formattedAppts || "(No active appointments found)"}
 
-Return ONLY the JSON matching the schema.
+User Input: "${text}"
+
+Analyze the User Input and match it to one of the following actions:
+
+1. "create": The user wants to schedule or create a NEW appointment.
+   - You must extract "title", "dateTime" (format: "YYYY-MM-DD HH:mm", Bangkok Time, Christian Era), and "details" (if any).
+   - Carefully resolve relative dates like "พรุ่งนี้" (tomorrow), "วันจันทร์หน้า" (next Monday), etc. relative to the Current Time.
+   - For year conversion, subtract 543 if Buddhist Era (พ.ศ.) is implied (e.g. 2569 -> 2026).
+
+2. "update": The user wants to modify, reschedule, or change an EXISTING appointment from the list above.
+   - You must identify which appointment from the list they are referring to (by title match, time proximity, or code).
+   - Extract the "appointmentCode" (e.g. "A-1234") of the matched appointment.
+   - Extract the changes under "changes". Only specify fields that are being changed:
+     * "title": New title (if changed)
+     * "dateTime": New date/time in "YYYY-MM-DD HH:mm" format (Bangkok Time, Christian Era) (if changed)
+     * "details": New details (if changed)
+
+3. "cancel": The user wants to cancel or delete an EXISTING appointment.
+   - Identify the matched appointment from the list.
+   - Extract the "appointmentCode" (e.g. "A-1234").
+
+4. "list": The user wants to see their scheduled appointments (e.g. "วันนี้มีประชุมอะไรบ้าง", "ขอดูนัดหมายหน่อย").
+
+5. "general": The user is asking a general question, greeting, or talking about something else not related to creating/updating/canceling appointments.
+   - Provide a friendly, helpful response in Thai under "generalResponse". Use information from the appointments list if relevant (e.g., if they ask about their appointments, or say hello). Keep it concise (max 3-4 sentences) and polite.
+
+If you are unsure or if the request is ambiguous (e.g., the user wants to update/cancel but there are multiple matching appointments or no appointments at all), set "action" to "error" and explain the issue in "explanation" in Thai (e.g. "ไม่พบนัดหมายที่จะเลื่อนค่ะ" or "มีนัดหมายที่คล้ายกันหลายรายการ กรุณาระบุรหัสการนัดหมาย เช่น A-1234").
+
+Return ONLY a JSON object matching this schema. Do not output markdown block wrappers (like \`\`\`json).
 `;
 
   try {
@@ -515,76 +609,231 @@ Return ONLY the JSON matching the schema.
       responseSchema: {
         type: "OBJECT",
         properties: {
-          title: { type: "STRING", description: "The main title/topic of the appointment" },
-          dateTime: { type: "STRING", description: "The date and time of the appointment in YYYY-MM-DD HH:mm format." },
-          details: { type: "STRING", description: "Any other details such as location or note. If none, leave blank." },
+          action: { 
+            type: "STRING", 
+            enum: ["create", "update", "cancel", "list", "general", "error"] 
+          },
+          appointmentCode: { 
+            type: "STRING", 
+            description: "The code of the matched appointment (required for update/cancel)" 
+          },
+          changes: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING", description: "New title if changed" },
+              dateTime: { type: "STRING", description: "New date time in YYYY-MM-DD HH:mm format if changed" },
+              details: { type: "STRING", description: "New details if changed" }
+            }
+          },
+          createData: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING", description: "Title of new appointment" },
+              dateTime: { type: "STRING", description: "Date time of new appointment in YYYY-MM-DD HH:mm format" },
+              details: { type: "STRING", description: "Details of new appointment" }
+            }
+          },
+          generalResponse: { 
+            type: "STRING", 
+            description: "Response message for general chat or greetings" 
+          },
+          explanation: { 
+            type: "STRING", 
+            description: "Explanation for errors or ambiguity in Thai" 
+          }
         },
-        required: ["title", "dateTime"],
-      },
+        required: ["action"]
+      }
     };
 
     const responseText = await callGeminiGenerateContent([{ text: prompt }], generationConfig);
     const result = JSON.parse(responseText);
-    if (!result.title || !result.dateTime) {
-      throw new Error("AI could not extract title or date/time from the text.");
-    }
 
-    // Now, parse the Bangkok date time and call create
-    const appointmentAt = parseBangkokDateTime(result.dateTime);
-    if (!appointmentAt) {
-      await replyLineMessage(
-        event.replyToken,
-        `❌ AI วิเคราะห์วันเวลาเป็น "${result.dateTime}" แต่รูปแบบไม่ถูกต้องสำหรับระบบ`
-      );
+    if (result.action === "error") {
+      await replyLineMessage(event.replyToken, `❌ ${result.explanation || "เกิดข้อผิดพลาดในการวิเคราะห์คำสั่ง"}`);
       return;
     }
 
-    if (appointmentAt.getTime() <= Date.now()) {
-      await replyLineMessage(
-        event.replyToken,
-        `❌ เวลานัดหมายต้องเป็นเวลาในอนาคต\n(AI วิเคราะห์เป็น: ${formatThaiDateTime(appointmentAt)})`
-      );
+    if (result.action === "general") {
+      await replyLineMessage(event.replyToken, result.generalResponse || "สวัสดีค่ะ มีอะไรให้ช่วยไหมคะ");
       return;
     }
 
-    const code = await createAppointmentCode();
+    if (result.action === "list") {
+      await listAppointments(event);
+      return;
+    }
 
-    await dbPool.execute(
-      `
-        INSERT INTO appointments
-          (appointment_code, source_type, source_id, title, details, appointment_at)
-        VALUES
-          (:code, :sourceType, :sourceId, :title, :details, :appointmentAt)
-      `,
-      {
-        code,
-        sourceType: event.source && event.source.type ? event.source.type : "unknown",
-        sourceId: getSourceId(event.source),
-        title: result.title,
-        details: result.details || null,
-        appointmentAt: toMysqlDateTime(appointmentAt),
+    if (result.action === "cancel") {
+      if (!result.appointmentCode) {
+        await replyLineMessage(event.replyToken, "❌ ไม่พบรหัสการนัดหมายที่จะยกเลิก");
+        return;
       }
-    );
+      await cancelAppointment(event, result.appointmentCode.toUpperCase());
+      return;
+    }
 
-    await replyLineMessage(
-      event.replyToken,
-      [
-        "🤖 บันทึกนัดหมายสำเร็จด้วย AI",
+    if (result.action === "create") {
+      const data = result.createData;
+      if (!data || !data.title || !data.dateTime) {
+        await replyLineMessage(event.replyToken, "❌ ข้อมูลสำหรับการสร้างนัดหมายไม่ครบถ้วน (ต้องการหัวข้อและวันเวลา)");
+        return;
+      }
+      
+      const appointmentAt = parseBangkokDateTime(data.dateTime);
+      if (!appointmentAt) {
+        await replyLineMessage(event.replyToken, `❌ รูปแบบวันเวลาไม่ถูกต้อง: ${data.dateTime}`);
+        return;
+      }
+
+      if (appointmentAt.getTime() <= Date.now()) {
+        await replyLineMessage(
+          event.replyToken,
+          `❌ เวลานัดหมายต้องเป็นเวลาในอนาคต\n(วิเคราะห์เป็น: ${formatThaiDateTime(appointmentAt)})`
+        );
+        return;
+      }
+
+      const code = await createAppointmentCode();
+
+      await dbPool.execute(
+        `
+          INSERT INTO appointments
+            (appointment_code, source_type, source_id, title, details, appointment_at)
+          VALUES
+            (:code, :sourceType, :sourceId, :title, :details, :appointmentAt)
+        `,
+        {
+          code,
+          sourceType: event.source && event.source.type ? event.source.type : "unknown",
+          sourceId: getSourceId(event.source),
+          title: data.title,
+          details: data.details || null,
+          appointmentAt: toMysqlDateTime(appointmentAt),
+        }
+      );
+
+      await replyLineMessage(
+        event.replyToken,
+        [
+          "🤖 บันทึกนัดหมายสำเร็จด้วย AI",
+          "─────────────────",
+          `📌 ${data.title}`,
+          `🕐 ${formatThaiDateTime(appointmentAt)}`,
+          `🔖 รหัส: ${code}`,
+          data.details ? `📝 ${data.details}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+      return;
+    }
+
+    if (result.action === "update") {
+      const code = result.appointmentCode;
+      const changes = result.changes;
+
+      if (!code) {
+        await replyLineMessage(event.replyToken, "❌ ไม่พบรหัสการนัดหมายที่จะเลื่อน");
+        return;
+      }
+
+      if (!changes || Object.keys(changes).length === 0) {
+        await replyLineMessage(event.replyToken, "❌ ไม่พบข้อมูลการเปลี่ยนแปลงที่ระบุ");
+        return;
+      }
+
+      // Fetch the current appointment details first to log the before-and-after change clearly
+      const [rows] = await dbPool.execute(
+        "SELECT title, details, appointment_at FROM appointments WHERE appointment_code = :code AND source_id = :sourceId AND status = 'active' LIMIT 1",
+        { code: code.toUpperCase(), sourceId: getSourceId(event.source) }
+      );
+
+      if (!rows.length) {
+        await replyLineMessage(event.replyToken, `❌ ไม่พบนัดหมายรหัส ${code.toUpperCase()} ในกลุ่มนี้`);
+        return;
+      }
+
+      const current = rows[0];
+      let newTitle = current.title;
+      let newDetails = current.details;
+      let newTime = current.appointment_at;
+      let timeChanged = false;
+
+      const updateFields = [];
+      const updateParams = { code: code.toUpperCase(), sourceId: getSourceId(event.source) };
+
+      if (changes.title) {
+        newTitle = sanitizePlainText(changes.title, 180);
+        updateFields.push("title = :newTitle");
+        updateParams.newTitle = newTitle;
+      }
+
+      if (changes.details) {
+        newDetails = sanitizePlainText(changes.details, 800);
+        updateFields.push("details = :newDetails");
+        updateParams.newDetails = newDetails;
+      }
+
+      if (changes.dateTime) {
+        const parsedTime = parseBangkokDateTime(changes.dateTime);
+        if (!parsedTime) {
+          await replyLineMessage(event.replyToken, `❌ รูปแบบเวลาใหม่ไม่ถูกต้อง: ${changes.dateTime}`);
+          return;
+        }
+        if (parsedTime.getTime() <= Date.now()) {
+          await replyLineMessage(
+            event.replyToken,
+            `❌ เวลาที่จะเลื่อนไปต้องเป็นเวลาในอนาคต\n(วิเคราะห์เป็น: ${formatThaiDateTime(parsedTime)})`
+          );
+          return;
+        }
+        newTime = parsedTime;
+        timeChanged = true;
+        updateFields.push("appointment_at = :newTime");
+        updateFields.push("morning_reminder_sent = 0");
+        updateFields.push("ten_minute_reminder_sent = 0");
+        updateParams.newTime = toMysqlDateTime(parsedTime);
+      }
+
+      if (updateFields.length === 0) {
+        await replyLineMessage(event.replyToken, "ℹ️ ไม่มีฟิลด์ใดที่เปลี่ยนแปลง");
+        return;
+      }
+
+      const query = `
+        UPDATE appointments
+        SET ${updateFields.join(", ")}
+        WHERE appointment_code = :code
+          AND source_id = :sourceId
+          AND status = 'active'
+      `;
+
+      await dbPool.execute(query, updateParams);
+
+      const summaryText = [
+        "🔄 เลื่อนนัดหมายสำเร็จด้วย AI",
         "─────────────────",
-        `📌 ${result.title}`,
-        `🕐 ${formatThaiDateTime(appointmentAt)}`,
-        `🔖 รหัส: ${code}`,
-        result.details ? `📝 ${result.details}` : "",
+        `📌 ${newTitle}`,
+        timeChanged 
+          ? `🕐 ${formatThaiDateTime(current.appointment_at)} ➡️ ${formatThaiDateTime(newTime)}`
+          : `🕐 ${formatThaiDateTime(newTime)}`,
+        `🔖 รหัส: ${code.toUpperCase()}`,
+        newDetails ? `📝 ${newDetails}` : "",
       ]
         .filter(Boolean)
-        .join("\n")
-    );
+        .join("\n");
+
+      await replyLineMessage(event.replyToken, summaryText);
+      return;
+    }
+
   } catch (error) {
-    console.error("AI appointment parsing failed:", error);
-    captureError("ai-appointment", error);
+    console.error("Natural language processing failed:", error);
+    captureError("nlp-appointment", error);
     await replyLineMessage(
       event.replyToken,
-      `❌ ระบบวิเคราะห์นัดหมายด้วย AI ผิดพลาด:\n${error.message || error}`
+      `❌ ระบบประมวลผลคำสั่งผิดพลาด:\n${error.message || error}`
     );
   }
 }
@@ -654,10 +903,12 @@ function getAppointmentHelpMessage() {
     "─────────────────",
     "/นัด หัวข้อ DD/MM/YYYY HH.mm สถานที่",
     "/นัดหมาย — ดูตารางนัดหมาย",
+    "/เลื่อนนัด ข้อความภาษาธรรมชาติ — เลื่อนเวลานัดหมาย",
     "/ยกเลิกนัด รหัส",
     "",
     "💡 ตัวอย่าง",
-    "/นัด อบรมต่อต้านยาเสพติด 30/06/2569 13.30 ห้องประชุมเอราวรรณ งานปกครอง",
+    "/นัด อบรมต่อต้านยาเสพติด 30/06/2569 13.30 ห้องประชุมเอราวรรณ",
+    "/เลื่อนนัด ประชุมโครงการเอเป็นพรุ่งนี้สิบโมงเช้า",
   ].join("\n");
 }
 
@@ -1193,6 +1444,11 @@ function parseAppointmentCommand(text) {
     return { type: "appointment.cancel", code: cancelMatch[1].toUpperCase() };
   }
 
+  const rescheduleMatch = text.match(/^\/(?:เลื่อนนัด|reschedule)\s+(.+)$/i);
+  if (rescheduleMatch) {
+    return { type: "appointment.reschedule_natural", text: rescheduleMatch[1].trim() };
+  }
+
   const createMatch = text.match(/^\/(?:นัด|appointment)\s+(.+)$/i);
   if (!createMatch) {
     return null;
@@ -1230,7 +1486,16 @@ function getHelpMessage() {
     "📅 นัดหมาย",
     "/นัด หัวข้อ DD/MM/YYYY HH.mm สถานที่",
     "/นัดหมาย — ดูนัดหมายที่กำลังจะมาถึง",
+    "/เลื่อนนัด ข้อความ — เลื่อนนัดด้วยภาษาธรรมชาติ",
     "/ยกเลิกนัด รหัส",
+    "",
+    "🤖 คุยและสั่งการด้วย AI (ภาษาธรรมชาติ)",
+    "พิมพ์ขึ้นต้นด้วย 'บอต' หรือ 'บอท' หรือ 'bot' เช่น:",
+    "- 'บอต นัดประชุมวันพรุ่งนี้ 10 โมง'",
+    "- 'บอต เลื่อนนัดประชุมโครงการเป็นบ่ายสาม'",
+    "- 'บอต ยกเลิกนัดเย็นนี้'",
+    "- 'บอต วันนี้มีประชุมอะไรบ้าง'",
+    "- พิมพ์คุยทั่วไปหรือถามข้อสงสัยได้เลยค่ะ",
     "",
     "🤖 สรุปเอกสาร/รูปภาพด้วย AI",
     "/สรุป — สรุปรวมรูปภาพ/ไฟล์ที่ส่งเข้ามาล่าสุด (ไม่เกิน 5 ไฟล์ใน 15 นาที)",
@@ -1238,7 +1503,7 @@ function getHelpMessage() {
     "",
     "💡 ตัวอย่าง",
     "/folder งานประชุม",
-    "/นัด อบรมต่อต้านยาเสพติด 30/06/2569 13.30 ห้องประชุมเอราวรรณ",
+    "/เลื่อนนัด เลื่อนประชุมเป็นวันจันทร์หน้าสิบโมงเช้า",
     "กดตอบกลับที่รูปภาพ -> พิมพ์ /สรุป",
   ].join("\n");
 }
