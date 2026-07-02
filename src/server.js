@@ -1198,7 +1198,7 @@ async function generateMultimodalSummary(files, customInstruction, additionalTex
 }
 
 async function callGeminiGenerateContent(parts, generationConfig = null) {
-  const models = ["gemini-2.5-flash", "gemini-1.5-flash"];
+  const models = ["gemini-3.5-flash", "gemini-2.5-flash"];
   let lastError = null;
 
   for (const model of models) {
